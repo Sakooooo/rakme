@@ -1,12 +1,10 @@
 use std::sync::Arc;
 
 use pixels::{Pixels, SurfaceTexture};
+use tiny_skia::{Color, Pixmap};
 use winit::{
-    application::ApplicationHandler,
-    error::EventLoopError,
-    event::WindowEvent,
-    event_loop::EventLoop,
-    window::Window,
+    application::ApplicationHandler, error::EventLoopError, event::WindowEvent,
+    event_loop::EventLoop, window::Window,
 };
 
 mod window;
@@ -15,8 +13,6 @@ struct App {
     window: Option<Arc<Window>>,
     pixels: Option<Pixels<'static>>,
 }
-
-const BACKGROUND: [u8; 4] = [28, 28, 28, 255];
 
 impl App {
     fn new() -> Self {
@@ -35,13 +31,17 @@ impl App {
             let size = self.window.as_ref().unwrap().inner_size();
             (size.width, size.height)
         };
+
+        let mut pixmap = Pixmap::new(width, height).unwrap();
+        pixmap.fill(Color::from_rgba8(74, 74, 84, 255));
+
         let frame = pixels.frame_mut();
 
-        for y in 0..height {
-            for x in 0..width {
-                let i = ((y * width + x) * 4) as usize;
-                frame[i..i + 4].copy_from_slice(&BACKGROUND);
-            }
+        for (dst, px) in frame.chunks_exact_mut(4).zip(pixmap.pixels()) {
+            dst[0] = px.red();
+            dst[1] = px.green();
+            dst[2] = px.blue();
+            dst[3] = px.alpha();
         }
 
         pixels.render().unwrap();

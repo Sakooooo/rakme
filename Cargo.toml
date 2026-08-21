@@ -5,4 +5,5 @@ edition = "2024"
 
 [dependencies]
 pixels = "0.17.2"
+tiny-skia = "0.12.0"
 winit = "0.30.13"
