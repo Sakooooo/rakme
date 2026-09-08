@@ -1,3 +1,6 @@
+# Warning 
+nowhere near ready for proper use current code is an ai generated base for later
+
 # rakme
 
 A clone of Plan 9's [acme](http://acme.cat-v.org/) text editor, written in
