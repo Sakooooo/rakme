@@ -1,5 +1,7 @@
 //! A text buffer with a selection, undo/redo, and acme's selection rules.
 
+use ropey::Rope;
+
 struct Change {
     pos: usize,
     del: Vec<char>,
@@ -7,7 +9,8 @@ struct Change {
 }
 
 pub struct Text {
-    buf: Vec<char>,
+    // buf: Vec<char>,
+    buf: Rope,
     pub q0: usize,
     pub q1: usize,
     undo: Vec<Change>,
@@ -36,7 +39,7 @@ pub fn is_filec(c: char) -> bool {
 impl Text {
     pub fn new() -> Text {
         Text {
-            buf: Vec::new(),
+            buf: Rope::new(),
             q0: 0,
             q1: 0,
             undo: Vec::new(),
@@ -48,34 +51,37 @@ impl Text {
 
     pub fn from_str(s: &str) -> Text {
         let mut t = Text::new();
-        t.buf = s.chars().collect();
+        t.buf = Rope::from_str(s);
         t
     }
 
     pub fn len(&self) -> usize {
-        self.buf.len()
+        self.buf.len_chars()
     }
 
     #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
-        self.buf.is_empty()
+        self.buf.len_chars() == 0
     }
 
     pub fn at(&self, i: usize) -> Option<char> {
-        self.buf.get(i).copied()
+        self.buf.get_char(i)
     }
 
-    pub fn chars(&self) -> &[char] {
-        &self.buf
+    pub fn chars(&self) -> Vec<char> {
+        self.buf.chars().collect()
+        // &self.buf
     }
 
     pub fn slice(&self, a: usize, b: usize) -> String {
         let (a, b) = self.clamp(a, b);
-        self.buf[a..b].iter().collect()
+        self.buf.slice(a..b).to_string()
+        // self.buf[a..b].iter().collect()
     }
 
     pub fn contents(&self) -> String {
-        self.buf.iter().collect()
+        // self.buf.iter().collect()
+        self.buf.to_string()
     }
 
     pub fn selection(&self) -> String {
@@ -84,7 +90,7 @@ impl Text {
 
     /// Replace everything, dropping history.
     pub fn set_contents(&mut self, s: &str) {
-        self.buf = s.chars().collect();
+        self.buf = Rope::from_str(s);
         self.q0 = 0;
         self.q1 = 0;
         self.undo.clear();
@@ -106,9 +112,20 @@ impl Text {
         self.q1 = b;
     }
 
+    // TODO: make this not &[char] maybe
     fn splice(&mut self, a: usize, b: usize, ins: &[char]) -> Vec<char> {
         self.seq += 1;
-        self.buf.splice(a..b, ins.iter().copied()).collect()
+        self.buf.remove(a..b);
+        let owned: String = ins.iter().collect();
+        let string = &owned;
+        self.buf.insert(a, string);
+        // self.buf.slice(a..b).chars().to_owned().collect()
+        if let Some(slice) = self.buf.get_slice(a..b) {
+            slice.chars().to_owned().collect()
+        } else {
+            Vec::new()
+        }
+        // self.buf.splice(a..b, ins.iter().copied()).collect()
     }
 
     fn push_change(&mut self, ch: Change) {
@@ -163,10 +180,9 @@ impl Text {
             && c != '\n'
             && self.redo.is_empty()
             && self.clean != Some(self.undo.len())
-            && self
-                .undo
-                .last()
-                .is_some_and(|ch| ch.del.is_empty() && !ch.ins.is_empty() && ch.pos + ch.ins.len() == a);
+            && self.undo.last().is_some_and(|ch| {
+                ch.del.is_empty() && !ch.ins.is_empty() && ch.pos + ch.ins.len() == a
+            });
         if mergeable {
             self.splice(a, a, &[c]);
             self.undo.last_mut().unwrap().ins.push(c);
@@ -229,7 +245,10 @@ impl Text {
     /// Start of the logical line containing position `p`.
     pub fn line_start(&self, p: usize) -> usize {
         let mut i = p.min(self.len());
-        while i > 0 && self.buf[i - 1] != '\n' {
+        while i > 0
+            && let Some(current_char) = self.buf.get_char(i)
+            && current_char != '\n'
+        {
             i -= 1;
         }
         i
@@ -238,7 +257,10 @@ impl Text {
     /// Index of the newline ending the line containing `p`, or the length.
     pub fn line_end(&self, p: usize) -> usize {
         let mut i = p.min(self.len());
-        while i < self.len() && self.buf[i] != '\n' {
+        while i < self.len()
+            && let Some(current_char) = self.buf.get_char(i)
+            && current_char != '\n'
+        {
             i += 1;
         }
         i
@@ -248,7 +270,7 @@ impl Text {
     pub fn line_range(&self, n: usize) -> (usize, usize) {
         let mut line = 1;
         let mut start = 0;
-        for (i, &c) in self.buf.iter().enumerate() {
+        for (i, c) in self.buf.chars().enumerate() {
             if line == n {
                 break;
             }
@@ -268,11 +290,17 @@ impl Text {
     pub fn expand(&self, p: usize, f: impl Fn(char) -> bool) -> (usize, usize) {
         let p = p.min(self.len());
         let mut a = p;
-        while a > 0 && f(self.buf[a - 1]) {
+        while a > 0
+            && let Some(current_char) = self.buf.get_char(a - 1)
+            && f(current_char)
+        {
             a -= 1;
         }
         let mut b = p;
-        while b < self.len() && f(self.buf[b]) {
+        while b < self.len()
+            && let Some(current_char) = self.buf.get_char(b - 1)
+            && f(current_char)
+        {
             b += 1;
         }
         (a, b)
@@ -285,29 +313,34 @@ impl Text {
         const R: &str = ")]}>";
         const Q: &str = "\"'`";
         if p > 0 {
-            let c = self.buf[p - 1];
-            if let Some(k) = L.find(c) {
-                let (l, r) = (c, R.chars().nth(k).unwrap());
-                if let Some(m) = self.match_forward(p, l, r) {
-                    return (p, m);
+            // let c = self.buf[p - 1];
+            let current_char = self.buf.get_char(p - 1);
+            if let Some(c) = current_char {
+                if let Some(k) = L.find(c) {
+                    let (l, r) = (c, R.chars().nth(k).unwrap());
+                    if let Some(m) = self.match_forward(p, l, r) {
+                        return (p, m);
+                    }
+                } else if Q.contains(c)
+                    && let Some(m) = self.buf.chars_at(p).position(|x| x == c)
+                {
+                    return (p, p + m);
                 }
-            } else if Q.contains(c)
-                && let Some(m) = self.buf[p..].iter().position(|&x| x == c)
-            {
-                return (p, p + m);
             }
         }
         if p < self.len() {
-            let c = self.buf[p];
-            if let Some(k) = R.find(c) {
-                let (l, r) = (L.chars().nth(k).unwrap(), c);
-                if let Some(m) = self.match_backward(p, l, r) {
-                    return (m, p);
+            let current_char = self.buf.get_char(p);
+            if let Some(c) = current_char {
+                if let Some(k) = R.find(c) {
+                    let (l, r) = (L.chars().nth(k).unwrap(), c);
+                    if let Some(m) = self.match_backward(p, l, r) {
+                        return (m, p);
+                    }
+                } else if Q.contains(c)
+                    && let Some(m) = self.buf.slice(..p).chars().position(|x| x == c)
+                {
+                    return (m + 1, p);
                 }
-            } else if Q.contains(c)
-                && let Some(m) = self.buf[..p].iter().rposition(|&x| x == c)
-            {
-                return (m + 1, p);
             }
         }
         let ls = self.line_start(p);
@@ -315,15 +348,21 @@ impl Text {
         if p == ls || p == le {
             return (ls, (le + 1).min(self.len()));
         }
-        if is_word(self.buf[p]) || (p > 0 && is_word(self.buf[p - 1])) {
-            return self.expand(p, is_word);
+        let current_char = self.buf.get_char(p);
+        let prev_char = self.buf.get_char(p - 1);
+        if let Some(cc) = current_char
+            && let Some(pc) = prev_char
+        {
+            if is_word(cc) || (p > 0 && is_word(pc)) {
+                return self.expand(p, is_word);
+            }
         }
         (p, p)
     }
 
     fn match_forward(&self, from: usize, l: char, r: char) -> Option<usize> {
         let mut depth = 1;
-        for (i, &c) in self.buf.iter().enumerate().skip(from) {
+        for (i, c) in self.buf.chars().enumerate().skip(from) {
             if c == l {
                 depth += 1;
             } else if c == r {
@@ -339,13 +378,14 @@ impl Text {
     fn match_backward(&self, from: usize, l: char, r: char) -> Option<usize> {
         let mut depth = 1;
         for i in (0..from).rev() {
-            let c = self.buf[i];
-            if c == r {
-                depth += 1;
-            } else if c == l {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(i + 1);
+            if let Some(c) = self.buf.get_char(i) {
+                if c == r {
+                    depth += 1;
+                } else if c == l {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(i + 1);
+                    }
                 }
             }
         }
@@ -360,8 +400,16 @@ impl Text {
         let n = self.len();
         let last = n - pat.len();
         let from = from.min(n);
-        let matches = |i: usize| self.buf[i..i + pat.len()] == *pat;
-        (from..=last).chain(0..from.min(last + 1)).find(|&i| matches(i))
+        // let matches = |i: usize| self.buf[i..i + pat.len()] == *pat;
+        let matches = |i: usize| {
+            self.buf
+                .slice(i..i + pat.len())
+                .chars()
+                .eq(pat.iter().copied())
+        };
+        (from..=last)
+            .chain(0..from.min(last + 1))
+            .find(|&i| matches(i))
     }
 }
 
