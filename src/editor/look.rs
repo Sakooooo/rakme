@@ -3,74 +3,74 @@
 use super::*;
 
 impl Editor {
-    /// Select the next occurrence of `pat` in the body of `win`, scroll to
-    /// it and ask for the pointer to be warped there.
-    pub(super) fn search(&mut self, win: usize, pat: &str) {
-        let pat: Vec<char> = pat.chars().collect();
-        if pat.is_empty() {
+    /// Select the next occurrence of `pattern` in the body of `win_id`,
+    /// scroll to it and ask for the pointer to be warped there.
+    pub(super) fn search(&mut self, win_id: usize, pattern: &str) {
+        let pattern: Vec<char> = pattern.chars().collect();
+        if pattern.is_empty() {
             return;
         }
-        let Some(w) = self.win_mut(win) else {
+        let Some(win) = self.win_mut(win_id) else {
             return;
         };
-        if let Some(i) = w.body.find(&pat, w.body.q1) {
-            w.body.set_select(i, i + pat.len());
-            self.focus = TextId::Body(win);
-            self.show(win, i, 0.33);
-            if let Some((x, y)) = self.xy_of(TextId::Body(win), i) {
-                self.warp = Some((x + 1, y + self.font.line_h / 2));
+        if let Some(match_pos) = win.body.find(&pattern, win.body.sel_end) {
+            win.body.set_select(match_pos, match_pos + pattern.len());
+            self.focus = TextId::Body(win_id);
+            self.show(win_id, match_pos, 0.33);
+            if let Some((x, y)) = self.xy_of(TextId::Body(win_id), match_pos) {
+                self.warp = Some((x + 1, y + self.font.line_height / 2));
             }
         }
     }
 
     /// Parse `name:addr`, returning the existing path and the address.
     fn resolve_file(&self, dir: &Path, text: &str) -> Option<(PathBuf, String)> {
-        let try_path = |s: &str| -> Option<PathBuf> {
-            if s.is_empty() {
+        let existing_path = |name: &str| -> Option<PathBuf> {
+            if name.is_empty() {
                 return None;
             }
-            let p = if Path::new(s).is_absolute() {
-                PathBuf::from(s)
+            let path = if Path::new(name).is_absolute() {
+                PathBuf::from(name)
             } else {
-                dir.join(s)
+                dir.join(name)
             };
-            if p.exists() { Some(p) } else { None }
+            if path.exists() { Some(path) } else { None }
         };
-        if let Some(p) = try_path(text) {
-            return Some((p, String::new()));
+        if let Some(path) = existing_path(text) {
+            return Some((path, String::new()));
         }
-        if let Some(i) = text.rfind(':')
-            && i > 0
-            && let Some(p) = try_path(&text[..i])
+        if let Some(colon) = text.rfind(':')
+            && colon > 0
+            && let Some(path) = existing_path(&text[..colon])
         {
-            return Some((p, text[i + 1..].to_string()));
+            return Some((path, text[colon + 1..].to_string()));
         }
         None
     }
 
     /// Apply an address: a line number, `$`, or `/text`.
-    fn address(&mut self, win: usize, addr: &str) {
-        let Some(w) = self.win_mut(win) else {
+    fn address(&mut self, win_id: usize, addr: &str) {
+        let Some(win) = self.win_mut(win_id) else {
             return;
         };
-        let t = &mut w.body;
-        if let Ok(n) = addr.parse::<usize>() {
-            let (a, b) = t.line_range(n.max(1));
-            t.set_select(a, b);
+        let body = &mut win.body;
+        if let Ok(line_num) = addr.parse::<usize>() {
+            let (start, end) = body.line_range(line_num.max(1));
+            body.set_select(start, end);
         } else if addr == "$" {
-            let n = t.len();
-            t.set_select(n, n);
-        } else if let Some(pat) = addr.strip_prefix('/') {
-            let pat = pat.strip_suffix('/').unwrap_or(pat);
-            let pat: Vec<char> = pat.chars().collect();
-            if let Some(i) = t.find(&pat, 0) {
-                t.set_select(i, i + pat.len());
+            let len = body.len();
+            body.set_select(len, len);
+        } else if let Some(pattern) = addr.strip_prefix('/') {
+            let pattern = pattern.strip_suffix('/').unwrap_or(pattern);
+            let pattern: Vec<char> = pattern.chars().collect();
+            if let Some(match_pos) = body.find(&pattern, 0) {
+                body.set_select(match_pos, match_pos + pattern.len());
             }
         } else {
             return;
         }
-        let q0 = t.q0;
-        self.show(win, q0, 0.33);
+        let sel_start = body.sel_start;
+        self.show(win_id, sel_start, 0.33);
     }
 
     /// Button 3 on `text` in `id`: an address, a file, or a search.
@@ -79,35 +79,41 @@ impl Editor {
         if text.is_empty() {
             return;
         }
-        let (win, col) = self.ctx(id);
-        let dir = win
-            .and_then(|w| self.win(w))
-            .map(|w| w.dir())
+        let (win_id, col_idx) = self.win_and_col(id);
+        let dir = win_id
+            .and_then(|id| self.win(id))
+            .map(|win| win.dir())
             .unwrap_or_else(cwd);
-        let ci = col.unwrap_or(self.cols.len().saturating_sub(1));
-        if let Some(w) = win
+        let col_idx = col_idx.unwrap_or(self.columns.len().saturating_sub(1));
+        if let Some(win_id) = win_id
             && let Some(addr) = text.strip_prefix(':')
         {
-            self.address(w, addr);
+            self.address(win_id, addr);
             return;
         }
         if let Some((path, addr)) = self.resolve_file(&dir, text) {
-            let target = self.open_file(&path, ci);
+            let target_id = self.open_file(&path, col_idx);
             if !addr.is_empty() {
-                self.address(target, &addr);
+                self.address(target_id, &addr);
             }
-            self.focus = TextId::Body(target);
-            let q = self.win(target).map(|w| w.body.q0).unwrap_or(0);
-            if let Some((x, y)) = self.xy_of(TextId::Body(target), q) {
-                self.warp = Some((x + 1, y + self.font.line_h / 2));
-            } else if let Some((tci, twi)) = self.find_win(target) {
-                let r = self.win_rects(tci, twi);
-                self.warp = Some((r.tag_text.x + 1, r.tag_text.y + self.font.line_h / 2));
+            self.focus = TextId::Body(target_id);
+            let sel_start = self
+                .win(target_id)
+                .map(|win| win.body.sel_start)
+                .unwrap_or(0);
+            if let Some((x, y)) = self.xy_of(TextId::Body(target_id), sel_start) {
+                self.warp = Some((x + 1, y + self.font.line_height / 2));
+            } else if let Some((col_idx, win_idx)) = self.find_win(target_id) {
+                let rects = self.win_rects(col_idx, win_idx);
+                self.warp = Some((
+                    rects.tag_text.x + 1,
+                    rects.tag_text.y + self.font.line_height / 2,
+                ));
             }
             return;
         }
-        if let Some(w) = win {
-            self.search(w, text);
+        if let Some(win_id) = win_id {
+            self.search(win_id, text);
         }
     }
 }

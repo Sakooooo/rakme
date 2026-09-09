@@ -10,49 +10,53 @@ impl Editor {
         match self.mouse.action {
             Action::Select { id } => {
                 let pos = self.hit_pos(id, x, y);
-                let anchor = self.mouse.last_click.map(|(_, _, p)| p).unwrap_or(pos);
-                if let Some(t) = self.text_mut(id) {
-                    t.set_select(anchor.min(pos), anchor.max(pos));
+                let anchor = self
+                    .mouse
+                    .last_click
+                    .map(|(_, _, click_pos)| click_pos)
+                    .unwrap_or(pos);
+                if let Some(text) = self.text_mut(id) {
+                    text.set_select(anchor.min(pos), anchor.max(pos));
                 }
             }
             Action::Sweep {
-                id, anchor, btn, ..
+                id, anchor, button, ..
             } => {
                 let pos = self.hit_pos(id, x, y);
                 self.mouse.action = Action::Sweep {
                     id,
                     anchor,
-                    btn,
-                    q0: anchor.min(pos),
-                    q1: anchor.max(pos),
+                    button,
+                    start: anchor.min(pos),
+                    end: anchor.max(pos),
                 };
             }
             _ => {}
         }
     }
 
-    pub fn mouse_press(&mut self, btn: u8, x: i32, y: i32) {
+    pub fn mouse_press(&mut self, button: u8, x: i32, y: i32) {
         self.mouse.x = x;
         self.mouse.y = y;
-        let prev = self.mouse.buttons;
-        self.mouse.buttons |= 1 << (btn - 1);
-        match btn {
+        let prev_buttons = self.mouse.held_buttons;
+        self.mouse.held_buttons |= 1 << (button - 1);
+        match button {
             1 => {
-                if prev & 0b010 != 0 {
+                if prev_buttons & 0b010 != 0 {
                     // 2-1 chord: the selection becomes the command's argument.
-                    self.mouse.arg = Some(self.selection_text(self.focus));
+                    self.mouse.chord_arg = Some(self.selection_text(self.focus));
                     return;
                 }
-                if prev != 0 {
+                if prev_buttons != 0 {
                     return;
                 }
-                self.press1(x, y);
+                self.press_button1(x, y);
             }
             2 | 3 => {
-                if prev & 0b001 != 0 {
+                if prev_buttons & 0b001 != 0 {
                     // 1-2 cuts, 1-3 pastes; 1-2-3 therefore snarfs.
                     if let Action::Select { id } = self.mouse.action {
-                        if btn == 2 {
+                        if button == 2 {
                             self.cut(id);
                         } else {
                             self.paste(id);
@@ -61,98 +65,106 @@ impl Editor {
                     }
                     return;
                 }
-                if prev != 0 {
+                if prev_buttons != 0 {
                     return;
                 }
-                self.press23(btn, x, y);
+                self.press_button23(button, x, y);
             }
             _ => {}
         }
     }
 
-    fn press1(&mut self, x: i32, y: i32) {
-        let h = self.hit(x, y);
-        match h {
+    fn press_button1(&mut self, x: i32, y: i32) {
+        let hit = self.hit(x, y);
+        match hit {
             Hit::RowTag | Hit::ColTag(_) | Hit::WinTag(..) | Hit::WinBody(..) => {
-                let id = self.id_of_hit(h).unwrap();
+                let id = self.id_of_hit(hit).unwrap();
                 let pos = self.hit_pos(id, x, y);
                 self.focus = id;
-                self.typing = Some((id, pos));
+                self.typing_start = Some((id, pos));
                 let now = Instant::now();
-                let double = matches!(self.mouse.last_click, Some((t, lid, lp)) if lid == id && lp == pos && now - t < DCLICK);
+                let is_double_click = matches!(
+                    self.mouse.last_click,
+                    Some((last_time, last_id, last_pos))
+                        if last_id == id && last_pos == pos && now - last_time < DOUBLE_CLICK_TIME
+                );
                 self.mouse.last_click = Some((now, id, pos));
-                let t = self.text_mut(id).unwrap();
-                if double {
-                    let (a, b) = t.dclick(pos);
-                    t.set_select(a, b);
+                let text = self.text_mut(id).unwrap();
+                if is_double_click {
+                    let (start, end) = text.double_click(pos);
+                    text.set_select(start, end);
                     self.mouse.action = Action::None;
                     self.mouse.last_click = None;
                 } else {
-                    t.set_select(pos, pos);
+                    text.set_select(pos, pos);
                     self.mouse.action = Action::Select { id };
                 }
             }
-            Hit::WinBox(ci, wi) => {
-                let win = self.cols[ci].wins[wi].id;
-                self.mouse.action = Action::WinBox { win, sx: x, sy: y };
+            Hit::WinBox(col_idx, win_idx) => {
+                let win_id = self.columns[col_idx].windows[win_idx].id;
+                self.mouse.action = Action::WinBox {
+                    win_id,
+                    press_x: x,
+                    press_y: y,
+                };
             }
-            Hit::ColBox(ci) => {
-                let col = self.cols[ci].id;
-                self.mouse.action = Action::ColBox { col, sx: x };
+            Hit::ColBox(col_idx) => {
+                let col_id = self.columns[col_idx].id;
+                self.mouse.action = Action::ColBox { col_id, press_x: x };
             }
-            Hit::WinScroll(ci, wi) => self.scrollbar(ci, wi, 1, y),
+            Hit::WinScroll(col_idx, win_idx) => self.scrollbar(col_idx, win_idx, 1, y),
             Hit::Nothing => {}
         }
     }
 
-    fn press23(&mut self, btn: u8, x: i32, y: i32) {
-        let h = self.hit(x, y);
-        match h {
+    fn press_button23(&mut self, button: u8, x: i32, y: i32) {
+        let hit = self.hit(x, y);
+        match hit {
             Hit::RowTag | Hit::ColTag(_) | Hit::WinTag(..) | Hit::WinBody(..) => {
-                let id = self.id_of_hit(h).unwrap();
+                let id = self.id_of_hit(hit).unwrap();
                 let pos = self.hit_pos(id, x, y);
                 self.mouse.action = Action::Sweep {
                     id,
                     anchor: pos,
-                    btn,
-                    q0: pos,
-                    q1: pos,
+                    button,
+                    start: pos,
+                    end: pos,
                 };
             }
-            Hit::WinBox(ci, wi) => {
-                let win = self.cols[ci].wins[wi].id;
-                self.grow_win(win, btn);
+            Hit::WinBox(col_idx, win_idx) => {
+                let win_id = self.columns[col_idx].windows[win_idx].id;
+                self.grow_win(win_id, button);
             }
-            Hit::ColBox(ci) => self.grow_col(ci, btn),
-            Hit::WinScroll(ci, wi) => self.scrollbar(ci, wi, btn, y),
+            Hit::ColBox(col_idx) => self.grow_col(col_idx, button),
+            Hit::WinScroll(col_idx, win_idx) => self.scrollbar(col_idx, win_idx, button, y),
             Hit::Nothing => {}
         }
     }
 
     /// Button 1 scrolls up, button 3 scrolls down (by an amount that grows
     /// with the pointer's height), button 2 jumps to that fraction.
-    fn scrollbar(&mut self, ci: usize, wi: usize, btn: u8, y: i32) {
-        let r = self.win_rects(ci, wi);
-        let id = self.cols[ci].wins[wi].id;
-        let Some(g) = self.geom(TextId::Body(id)) else {
+    fn scrollbar(&mut self, col_idx: usize, win_idx: usize, button: u8, y: i32) {
+        let rects = self.win_rects(col_idx, win_idx);
+        let win_id = self.columns[col_idx].windows[win_idx].id;
+        let Some(geom) = self.geom(TextId::Body(win_id)) else {
             return;
         };
-        let h = r.sb.h.max(1);
-        let frac = ((y - r.sb.y) as f32 / h as f32).clamp(0.0, 1.0);
-        match btn {
+        let trough_height = rects.scrollbar.h.max(1);
+        let frac = ((y - rects.scrollbar.y) as f32 / trough_height as f32).clamp(0.0, 1.0);
+        match button {
             1 => {
-                let n = ((frac * g.rows as f32) as i64).max(1);
-                self.scroll_by(id, -n);
+                let lines = ((frac * geom.rows as f32) as i64).max(1);
+                self.scroll_by(win_id, -lines);
             }
             3 => {
-                let n = ((frac * g.rows as f32) as i64).max(1);
-                self.scroll_by(id, n);
+                let lines = ((frac * geom.rows as f32) as i64).max(1);
+                self.scroll_by(win_id, lines);
             }
             _ => {
-                let w = self.win_mut(id).unwrap();
-                let idx = (frac * w.body.len() as f32) as usize;
-                let ls = w.body.line_start(idx);
-                w.origin = frame::origin_for(&w.body, ls, g.cols, g.tab, 0);
+                let win = self.win_mut(win_id).unwrap();
+                let pos = (frac * win.body.len() as f32) as usize;
+                let line_start = win.body.line_start(pos);
+                win.origin = frame::origin_for(&win.body, line_start, geom.cols, geom.tab_width, 0);
             }
         }
     }
@@ -161,77 +173,88 @@ impl Editor {
         if lines == 0 {
             return;
         }
-        if let Hit::WinBody(ci, wi)
-        | Hit::WinScroll(ci, wi)
-        | Hit::WinTag(ci, wi)
-        | Hit::WinBox(ci, wi) = self.hit(x, y)
+        if let Hit::WinBody(col_idx, win_idx)
+        | Hit::WinScroll(col_idx, win_idx)
+        | Hit::WinTag(col_idx, win_idx)
+        | Hit::WinBox(col_idx, win_idx) = self.hit(x, y)
         {
-            let id = self.cols[ci].wins[wi].id;
-            self.scroll_by(id, lines);
+            let win_id = self.columns[col_idx].windows[win_idx].id;
+            self.scroll_by(win_id, lines);
         }
     }
 
-    pub fn mouse_release(&mut self, btn: u8, x: i32, y: i32) {
+    pub fn mouse_release(&mut self, button: u8, x: i32, y: i32) {
         self.mouse.x = x;
         self.mouse.y = y;
-        self.mouse.buttons &= !(1 << (btn - 1));
+        self.mouse.held_buttons &= !(1 << (button - 1));
         let action = self.mouse.action;
-        match (btn, action) {
+        match (button, action) {
             (1, Action::Select { .. }) => self.mouse.action = Action::None,
-            (1, Action::WinBox { win, sx, sy }) => {
+            (
+                1,
+                Action::WinBox {
+                    win_id,
+                    press_x,
+                    press_y,
+                },
+            ) => {
                 self.mouse.action = Action::None;
-                if (x - sx).abs() > 3 || (y - sy).abs() > 3 {
-                    self.move_win(win, x, y);
+                if (x - press_x).abs() > 3 || (y - press_y).abs() > 3 {
+                    self.move_win(win_id, x, y);
                 } else {
-                    self.grow_win(win, 1);
+                    self.grow_win(win_id, 1);
                 }
             }
-            (1, Action::ColBox { col, sx }) => {
+            (1, Action::ColBox { col_id, press_x }) => {
                 self.mouse.action = Action::None;
-                if let Some(ci) = self.find_col(col) {
-                    if (x - sx).abs() > 3 {
-                        self.move_col(ci, x);
+                if let Some(col_idx) = self.find_col(col_id) {
+                    if (x - press_x).abs() > 3 {
+                        self.move_col(col_idx, x);
                     } else {
-                        self.grow_col(ci, 1);
+                        self.grow_col(col_idx, 1);
                     }
                 }
             }
             (
-                b,
+                released,
                 Action::Sweep {
-                    id, btn, q0, q1, ..
+                    id,
+                    button: sweep_button,
+                    start,
+                    end,
+                    ..
                 },
-            ) if b == btn => {
+            ) if released == sweep_button => {
                 self.mouse.action = Action::None;
-                let arg = self.mouse.arg.take();
+                let chord_arg = self.mouse.chord_arg.take();
                 if !self.mouse.chorded && self.text(id).is_some() {
-                    let (a, b) = if q0 == q1 {
-                        self.expand(id, q0, btn)
+                    let (start, end) = if start == end {
+                        self.sweep_range(id, start, sweep_button)
                     } else {
-                        (q0, q1)
+                        (start, end)
                     };
-                    let text = self.text(id).unwrap().slice(a, b);
-                    if btn == 3 {
+                    let swept = self.text(id).unwrap().slice(start, end);
+                    if sweep_button == 3 {
                         // Looking selects what was looked at, so the search
                         // continues from there.
-                        self.text_mut(id).unwrap().set_select(a, b);
+                        self.text_mut(id).unwrap().set_select(start, end);
                     }
-                    if btn == 2 {
-                        let cmd = match arg {
-                            Some(a) if !a.is_empty() => format!("{text} {a}"),
-                            _ => text,
+                    if sweep_button == 2 {
+                        let command_line = match chord_arg {
+                            Some(arg) if !arg.is_empty() => format!("{swept} {arg}"),
+                            _ => swept,
                         };
-                        self.execute(id, &cmd);
+                        self.execute(id, &command_line);
                     } else {
-                        self.look3(id, &text);
+                        self.look3(id, &swept);
                     }
                 }
             }
             _ => {}
         }
-        if self.mouse.buttons == 0 {
+        if self.mouse.held_buttons == 0 {
             self.mouse.chorded = false;
-            self.mouse.arg = None;
+            self.mouse.chord_arg = None;
             if matches!(self.mouse.action, Action::Sweep { .. }) {
                 self.mouse.action = Action::None;
             }
@@ -239,33 +262,41 @@ impl Editor {
     }
 
     /// Expand a null sweep at `pos` into the range to execute or look for.
-    fn expand(&self, id: TextId, pos: usize, btn: u8) -> (usize, usize) {
-        let t = self.text(id).unwrap();
-        if t.q0 < t.q1 && pos >= t.q0 && pos <= t.q1 {
-            return (t.q0, t.q1);
+    fn sweep_range(&self, id: TextId, pos: usize, button: u8) -> (usize, usize) {
+        let text = self.text(id).unwrap();
+        if text.sel_start < text.sel_end && pos >= text.sel_start && pos <= text.sel_end {
+            return (text.sel_start, text.sel_end);
         }
-        if btn == 2 {
-            t.expand(pos, |c| !c.is_whitespace())
+        if button == 2 {
+            text.expand(pos, |ch| !ch.is_whitespace())
         } else {
-            let (a, b) = t.expand(pos, is_filec);
-            if a == b {
-                t.expand(pos, is_word)
+            let (start, end) = text.expand(pos, is_filename_char);
+            if start == end {
+                text.expand(pos, is_word_char)
             } else {
-                (a, b)
+                (start, end)
             }
         }
     }
 
     /// The sweep highlight to draw for `id`, if any.
-    pub(super) fn sweep_of(&self, id: TextId) -> Option<(usize, usize, gfx::Color)> {
+    pub(super) fn sweep_highlight(&self, id: TextId) -> Option<(usize, usize, gfx::Color)> {
         match self.mouse.action {
             Action::Sweep {
-                id: sid,
-                btn,
-                q0,
-                q1,
+                id: sweep_id,
+                button,
+                start,
+                end,
                 ..
-            } if sid == id => Some((q0, q1, if btn == 2 { gfx::BUT2 } else { gfx::BUT3 })),
+            } if sweep_id == id => Some((
+                start,
+                end,
+                if button == 2 {
+                    gfx::BUTTON2_SWEEP
+                } else {
+                    gfx::BUTTON3_SWEEP
+                },
+            )),
             _ => None,
         }
     }

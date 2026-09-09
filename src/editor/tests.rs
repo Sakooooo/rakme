@@ -6,145 +6,147 @@ fn editor() -> Editor {
 }
 
 /// Pixel position just inside the first cell of `needle` in text `id`.
-fn point_at(ed: &Editor, id: TextId, needle: &str) -> (i32, i32) {
-    let t = ed.text(id).unwrap();
-    let s = t.contents();
-    let byte = s
+fn point_at(editor: &Editor, id: TextId, needle: &str) -> (i32, i32) {
+    let text = editor.text(id).unwrap();
+    let contents = text.contents();
+    let byte_idx = contents
         .find(needle)
-        .unwrap_or_else(|| panic!("{needle:?} not in {s:?}"));
-    let idx = s[..byte].chars().count();
-    let (x, y) = ed.xy_of(id, idx).expect("needle is visible");
+        .unwrap_or_else(|| panic!("{needle:?} not in {contents:?}"));
+    let char_idx = contents[..byte_idx].chars().count();
+    let (x, y) = editor.xy_of(id, char_idx).expect("needle is visible");
     (x + 2, y + 2)
 }
 
-fn click(ed: &mut Editor, btn: u8, (x, y): (i32, i32)) {
-    ed.mouse_press(btn, x, y);
-    ed.mouse_release(btn, x, y);
+fn click(editor: &mut Editor, button: u8, (x, y): (i32, i32)) {
+    editor.mouse_press(button, x, y);
+    editor.mouse_release(button, x, y);
 }
 
-fn only_win_in(ed: &Editor, ci: usize) -> usize {
-    assert_eq!(ed.cols[ci].wins.len(), 1);
-    ed.cols[ci].wins[0].id
+fn only_win_in(editor: &Editor, col_idx: usize) -> usize {
+    assert_eq!(editor.columns[col_idx].windows.len(), 1);
+    editor.columns[col_idx].windows[0].id
 }
 
 #[test]
 fn starts_with_two_columns_and_a_directory_window() {
-    let ed = editor();
-    assert_eq!(ed.cols.len(), 2);
-    assert!(ed.cols[0].wins.is_empty());
-    let w = &ed.cols[1].wins[0];
-    assert!(w.is_dir);
-    assert!(w.tag.contents().starts_with(&w.name));
-    assert!(w.tag.contents().contains("| Look"));
+    let editor = editor();
+    assert_eq!(editor.columns.len(), 2);
+    assert!(editor.columns[0].windows.is_empty());
+    let win = &editor.columns[1].windows[0];
+    assert!(win.is_dir);
+    assert!(win.tag.contents().starts_with(&win.name));
+    assert!(win.tag.contents().contains("| Look"));
 }
 
 #[test]
 fn button2_on_column_tag_runs_new() {
-    let mut ed = editor();
-    let col = TextId::ColTag(ed.cols[0].id);
-    let p = point_at(&ed, col, "New");
-    click(&mut ed, 2, p);
-    let id = only_win_in(&ed, 0);
-    assert_eq!(ed.focus, TextId::Body(id));
-    assert!(ed.win(id).unwrap().name.is_empty());
+    let mut editor = editor();
+    let col_tag = TextId::ColTag(editor.columns[0].id);
+    let point = point_at(&editor, col_tag, "New");
+    click(&mut editor, 2, point);
+    let win_id = only_win_in(&editor, 0);
+    assert_eq!(editor.focus, TextId::Body(win_id));
+    assert!(editor.win(win_id).unwrap().name.is_empty());
 }
 
 #[test]
 fn typing_cut_paste_and_undo() {
-    let mut ed = editor();
-    let col = TextId::ColTag(ed.cols[0].id);
-    let p = point_at(&ed, col, "New");
-    click(&mut ed, 2, p);
-    let id = only_win_in(&ed, 0);
-    let body = TextId::Body(id);
-    for c in "hello world".chars() {
-        ed.key(Key::Char(c));
+    let mut editor = editor();
+    let col_tag = TextId::ColTag(editor.columns[0].id);
+    let point = point_at(&editor, col_tag, "New");
+    click(&mut editor, 2, point);
+    let win_id = only_win_in(&editor, 0);
+    let body = TextId::Body(win_id);
+    for ch in "hello world".chars() {
+        editor.key(Key::Char(ch));
     }
-    assert_eq!(ed.text(body).unwrap().contents(), "hello world");
-    assert!(ed.win(id).unwrap().dirty());
-    assert!(ed.win(id).unwrap().tag.contents().contains(" Put "));
+    assert_eq!(editor.text(body).unwrap().contents(), "hello world");
+    assert!(editor.win(win_id).unwrap().dirty());
+    assert!(editor.win(win_id).unwrap().tag.contents().contains(" Put "));
 
     // Sweep "world" with button 1, then chord button 2 to cut it.
-    let (x0, y0) = point_at(&ed, body, "world");
-    let (x1, _) = point_at(&ed, body, "d");
-    ed.mouse_press(1, x0, y0);
-    ed.mouse_move(x1 + ed.font.adv, y0);
-    assert_eq!(ed.text(body).unwrap().selection(), "world");
-    ed.mouse_press(2, x1 + ed.font.adv, y0);
-    ed.mouse_release(2, x1 + ed.font.adv, y0);
-    ed.mouse_release(1, x1 + ed.font.adv, y0);
-    assert_eq!(ed.text(body).unwrap().contents(), "hello ");
-    assert_eq!(ed.snarf, "world");
+    let (start_x, start_y) = point_at(&editor, body, "world");
+    let (end_x, _) = point_at(&editor, body, "d");
+    let end_x = end_x + editor.font.cell_width;
+    editor.mouse_press(1, start_x, start_y);
+    editor.mouse_move(end_x, start_y);
+    assert_eq!(editor.text(body).unwrap().selection(), "world");
+    editor.mouse_press(2, end_x, start_y);
+    editor.mouse_release(2, end_x, start_y);
+    editor.mouse_release(1, end_x, start_y);
+    assert_eq!(editor.text(body).unwrap().contents(), "hello ");
+    assert_eq!(editor.snarf, "world");
 
     // Button 1 then button 3 pastes.
-    let (x, y) = point_at(&ed, body, "hello");
-    ed.mouse_press(1, x, y);
-    ed.mouse_press(3, x, y);
-    ed.mouse_release(3, x, y);
-    ed.mouse_release(1, x, y);
-    assert_eq!(ed.text(body).unwrap().contents(), "worldhello ");
+    let (x, y) = point_at(&editor, body, "hello");
+    editor.mouse_press(1, x, y);
+    editor.mouse_press(3, x, y);
+    editor.mouse_release(3, x, y);
+    editor.mouse_release(1, x, y);
+    assert_eq!(editor.text(body).unwrap().contents(), "worldhello ");
 
     // Undo via the tag.
-    let tag = TextId::Tag(id);
-    let p = point_at(&ed, tag, "Undo");
-    click(&mut ed, 2, p);
-    assert_eq!(ed.text(body).unwrap().contents(), "hello ");
+    let tag = TextId::Tag(win_id);
+    let point = point_at(&editor, tag, "Undo");
+    click(&mut editor, 2, point);
+    assert_eq!(editor.text(body).unwrap().contents(), "hello ");
 }
 
 #[test]
 fn button3_searches_forward_and_wraps() {
-    let mut ed = editor();
-    let col = TextId::ColTag(ed.cols[0].id);
-    let p = point_at(&ed, col, "New");
-    click(&mut ed, 2, p);
-    let id = only_win_in(&ed, 0);
-    let body = TextId::Body(id);
-    ed.text_mut(body)
+    let mut editor = editor();
+    let col_tag = TextId::ColTag(editor.columns[0].id);
+    let point = point_at(&editor, col_tag, "New");
+    click(&mut editor, 2, point);
+    let win_id = only_win_in(&editor, 0);
+    let body = TextId::Body(win_id);
+    editor
+        .text_mut(body)
         .unwrap()
         .set_contents("foo bar\nfoo baz\n");
-    let p = point_at(&ed, body, "foo");
-    click(&mut ed, 3, p);
-    let t = ed.text(body).unwrap();
-    assert_eq!((t.q0, t.q1), (8, 11));
+    let point = point_at(&editor, body, "foo");
+    click(&mut editor, 3, point);
+    let text = editor.text(body).unwrap();
+    assert_eq!((text.sel_start, text.sel_end), (8, 11));
     // The pointer is warped onto the match; clicking there continues
     // the search, wrapping around to the first occurrence.
-    let (wx, wy) = ed.warp.take().unwrap();
-    click(&mut ed, 3, (wx, wy));
-    let t = ed.text(body).unwrap();
-    assert_eq!((t.q0, t.q1), (0, 3));
+    let (warp_x, warp_y) = editor.warp.take().unwrap();
+    click(&mut editor, 3, (warp_x, warp_y));
+    let text = editor.text(body).unwrap();
+    assert_eq!((text.sel_start, text.sel_end), (0, 3));
 }
 
 #[test]
 fn put_get_and_del_warning() {
-    let mut ed = editor();
+    let mut editor = editor();
     let dir = std::env::temp_dir().join(format!("rakme-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("note.txt");
     std::fs::write(&path, "one\n").unwrap();
 
-    let id = ed.open_file(&path, 0);
-    let body = TextId::Body(id);
-    assert_eq!(ed.text(body).unwrap().contents(), "one\n");
-    ed.focus = body;
-    ed.text_mut(body).unwrap().set_select(4, 4);
-    for c in "two\n".chars() {
-        ed.key(Key::Char(c));
+    let win_id = editor.open_file(&path, 0);
+    let body = TextId::Body(win_id);
+    assert_eq!(editor.text(body).unwrap().contents(), "one\n");
+    editor.focus = body;
+    editor.text_mut(body).unwrap().set_select(4, 4);
+    for ch in "two\n".chars() {
+        editor.key(Key::Char(ch));
     }
     // Del on a dirty window is refused once and reported in +Errors.
-    ed.execute(TextId::Tag(id), "Del");
-    assert!(ed.find_win(id).is_some());
-    let errs = ed
-        .cols
+    editor.execute(TextId::Tag(win_id), "Del");
+    assert!(editor.find_win(win_id).is_some());
+    let errors_win = editor
+        .columns
         .iter()
-        .flat_map(|c| c.wins.iter())
-        .find(|w| w.name.ends_with("+Errors"))
+        .flat_map(|col| col.windows.iter())
+        .find(|win| win.name.ends_with("+Errors"))
         .unwrap();
-    assert!(errs.body.contents().contains("file modified"));
+    assert!(errors_win.body.contents().contains("file modified"));
 
-    ed.execute(TextId::Tag(id), "Put");
+    editor.execute(TextId::Tag(win_id), "Put");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "one\ntwo\n");
-    assert!(!ed.win(id).unwrap().dirty());
-    ed.execute(TextId::Tag(id), "Del");
-    assert!(ed.find_win(id).is_none());
+    assert!(!editor.win(win_id).unwrap().dirty());
+    editor.execute(TextId::Tag(win_id), "Del");
+    assert!(editor.find_win(win_id).is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }

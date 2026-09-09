@@ -21,9 +21,9 @@ pub const PURPLE_BLUE: Color = [0x88, 0x88, 0xCC];
 /// Dirty box.
 pub const DARK_BLUE: Color = [0x00, 0x00, 0x99];
 /// Button 2 sweep highlight.
-pub const BUT2: Color = [0xAA, 0x00, 0x00];
+pub const BUTTON2_SWEEP: Color = [0xAA, 0x00, 0x00];
 /// Button 3 sweep highlight.
-pub const BUT3: Color = [0x00, 0x66, 0x00];
+pub const BUTTON3_SWEEP: Color = [0x00, 0x66, 0x00];
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Rect {
@@ -54,78 +54,87 @@ impl Rect {
         self.w <= 0 || self.h <= 0
     }
 
-    pub fn inter(&self, o: Rect) -> Rect {
-        let x = self.x.max(o.x);
-        let y = self.y.max(o.y);
-        let r = self.right().min(o.right());
-        let b = self.bottom().min(o.bottom());
-        Rect::new(x, y, r - x, b - y)
+    pub fn intersect(&self, other: Rect) -> Rect {
+        let x = self.x.max(other.x);
+        let y = self.y.max(other.y);
+        let right = self.right().min(other.right());
+        let bottom = self.bottom().min(other.bottom());
+        Rect::new(x, y, right - x, bottom - y)
     }
 }
 
-fn bounds(pm: &Pixmap) -> Rect {
-    Rect::new(0, 0, pm.width() as i32, pm.height() as i32)
+fn bounds(pixmap: &Pixmap) -> Rect {
+    Rect::new(0, 0, pixmap.width() as i32, pixmap.height() as i32)
 }
 
-pub fn fill(pm: &mut Pixmap, r: Rect, c: Color) {
-    let r = r.inter(bounds(pm));
-    if r.is_empty() {
+pub fn fill(pixmap: &mut Pixmap, rect: Rect, color: Color) {
+    let rect = rect.intersect(bounds(pixmap));
+    if rect.is_empty() {
         return;
     }
-    let pw = pm.width() as usize;
-    let data = pm.data_mut();
-    for y in r.y..r.bottom() {
-        let row = y as usize * pw;
-        for x in r.x..r.right() {
-            let i = (row + x as usize) * 4;
-            data[i] = c[0];
-            data[i + 1] = c[1];
-            data[i + 2] = c[2];
-            data[i + 3] = 255;
+    let pixmap_width = pixmap.width() as usize;
+    let data = pixmap.data_mut();
+    for y in rect.y..rect.bottom() {
+        let row_start = y as usize * pixmap_width;
+        for x in rect.x..rect.right() {
+            let idx = (row_start + x as usize) * 4;
+            data[idx] = color[0];
+            data[idx + 1] = color[1];
+            data[idx + 2] = color[2];
+            data[idx + 3] = 255;
         }
     }
 }
 
-/// Draw a 1px outline just inside `r`.
-pub fn outline(pm: &mut Pixmap, r: Rect, c: Color) {
-    fill(pm, Rect::new(r.x, r.y, r.w, 1), c);
-    fill(pm, Rect::new(r.x, r.bottom() - 1, r.w, 1), c);
-    fill(pm, Rect::new(r.x, r.y, 1, r.h), c);
-    fill(pm, Rect::new(r.right() - 1, r.y, 1, r.h), c);
+/// Draw a 1px outline just inside `rect`.
+pub fn outline(pixmap: &mut Pixmap, rect: Rect, color: Color) {
+    fill(pixmap, Rect::new(rect.x, rect.y, rect.w, 1), color);
+    fill(
+        pixmap,
+        Rect::new(rect.x, rect.bottom() - 1, rect.w, 1),
+        color,
+    );
+    fill(pixmap, Rect::new(rect.x, rect.y, 1, rect.h), color);
+    fill(
+        pixmap,
+        Rect::new(rect.right() - 1, rect.y, 1, rect.h),
+        color,
+    );
 }
 
 /// Blend one glyph whose cell's top-left corner is at (x, y).
-pub fn glyph(pm: &mut Pixmap, font: &Font, x: i32, y: i32, ch: char, color: Color, clip: Rect) {
-    let g = font.glyph(ch);
-    if g.w == 0 || g.h == 0 {
+pub fn glyph(pixmap: &mut Pixmap, font: &Font, x: i32, y: i32, ch: char, color: Color, clip: Rect) {
+    let glyph = font.glyph(ch);
+    if glyph.width == 0 || glyph.height == 0 {
         return;
     }
-    let clip = clip.inter(bounds(pm));
+    let clip = clip.intersect(bounds(pixmap));
     if clip.is_empty() {
         return;
     }
-    let pw = pm.width() as usize;
-    let data = pm.data_mut();
-    for gy in 0..g.h {
-        let py = y + g.y + gy as i32;
-        if py < clip.y || py >= clip.bottom() {
+    let pixmap_width = pixmap.width() as usize;
+    let data = pixmap.data_mut();
+    for glyph_y in 0..glyph.height {
+        let pixel_y = y + glyph.offset_y + glyph_y as i32;
+        if pixel_y < clip.y || pixel_y >= clip.bottom() {
             continue;
         }
-        for gx in 0..g.w {
-            let px = x + g.x + gx as i32;
-            if px < clip.x || px >= clip.right() {
+        for glyph_x in 0..glyph.width {
+            let pixel_x = x + glyph.offset_x + glyph_x as i32;
+            if pixel_x < clip.x || pixel_x >= clip.right() {
                 continue;
             }
-            let a = g.cov[gy * g.w + gx] as u32;
-            if a == 0 {
+            let alpha = glyph.coverage[glyph_y * glyph.width + glyph_x] as u32;
+            if alpha == 0 {
                 continue;
             }
-            let i = (py as usize * pw + px as usize) * 4;
-            for k in 0..3 {
-                let d = data[i + k] as u32;
-                data[i + k] = ((d * (255 - a) + color[k] as u32 * a) / 255) as u8;
+            let idx = (pixel_y as usize * pixmap_width + pixel_x as usize) * 4;
+            for channel in 0..3 {
+                let dst = data[idx + channel] as u32;
+                data[idx + channel] =
+                    ((dst * (255 - alpha) + color[channel] as u32 * alpha) / 255) as u8;
             }
-            data[i + 3] = 255;
+            data[idx + 3] = 255;
         }
     }
 }

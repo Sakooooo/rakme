@@ -4,39 +4,41 @@ use super::*;
 
 impl Editor {
     /// Report a message in the `+Errors` window for `dir`.
-    pub(super) fn error(&mut self, dir: Option<PathBuf>, col: Option<usize>, msg: &str) {
+    pub(super) fn error(&mut self, dir: Option<PathBuf>, col_idx: Option<usize>, msg: &str) {
         let dir = dir.unwrap_or_else(cwd);
         let mut msg = msg.to_string();
         if !msg.ends_with('\n') {
             msg.push('\n');
         }
-        self.append_errors(&dir, col, &msg);
+        self.append_errors(&dir, col_idx, &msg);
     }
 
-    fn errors_win(&mut self, dir: &Path, col: Option<usize>) -> usize {
+    /// Id of the `+Errors` window for `dir`, creating it in column
+    /// `col_idx` (or the last column) if needed.
+    fn errors_win_id(&mut self, dir: &Path, col_idx: Option<usize>) -> usize {
         let name = format!("{}/+Errors", dir_string(dir));
-        for c in &self.cols {
-            for w in &c.wins {
-                if w.name == name {
-                    return w.id;
+        for col in &self.columns {
+            for win in &col.windows {
+                if win.name == name {
+                    return win.id;
                 }
             }
         }
-        let ci = col.unwrap_or(self.cols.len().saturating_sub(1));
-        self.new_win(ci, name)
+        let col_idx = col_idx.unwrap_or(self.columns.len().saturating_sub(1));
+        self.new_win(col_idx, name)
     }
 
-    pub(super) fn append_errors(&mut self, dir: &Path, col: Option<usize>, text: &str) {
+    pub(super) fn append_errors(&mut self, dir: &Path, col_idx: Option<usize>, text: &str) {
         if text.is_empty() {
             return;
         }
-        let id = self.errors_win(dir, col);
-        let w = self.win_mut(id).unwrap();
-        let n = w.body.len();
-        w.body.replace_raw(n, n, text);
-        let n = w.body.len();
-        w.body.set_select(n, n);
-        self.show(id, n, 0.999);
+        let win_id = self.errors_win_id(dir, col_idx);
+        let win = self.win_mut(win_id).unwrap();
+        let len = win.body.len();
+        win.body.replace_raw(len, len, text);
+        let len = win.body.len();
+        win.body.set_select(len, len);
+        self.show(win_id, len, 0.999);
         self.update_tags();
     }
 
@@ -45,73 +47,76 @@ impl Editor {
         if path.is_dir() {
             let mut names: Vec<String> = std::fs::read_dir(path)
                 .map_err(|e| e.to_string())?
-                .filter_map(|e| e.ok())
-                .map(|e| {
-                    let mut n = e.file_name().to_string_lossy().into_owned();
-                    if e.path().is_dir() {
-                        n.push('/');
+                .filter_map(|entry| entry.ok())
+                .map(|entry| {
+                    let mut name = entry.file_name().to_string_lossy().into_owned();
+                    if entry.path().is_dir() {
+                        name.push('/');
                     }
-                    n
+                    name
                 })
                 .collect();
             names.sort();
-            let mut s = names.join("\n");
-            if !s.is_empty() {
-                s.push('\n');
+            let mut listing = names.join("\n");
+            if !listing.is_empty() {
+                listing.push('\n');
             }
-            Ok((s, true))
+            Ok((listing, true))
         } else {
             let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
             Ok((String::from_utf8_lossy(&bytes).into_owned(), false))
         }
     }
 
-    /// Open (or find) a window for `path` in column `ci`.
-    pub fn open_file(&mut self, path: &Path, ci: usize) -> usize {
+    /// Open (or find) a window for `path` in column `col_idx`. Returns the
+    /// window's id.
+    pub fn open_file(&mut self, path: &Path, col_idx: usize) -> usize {
         let name = clean_path(path);
-        for c in &self.cols {
-            for w in &c.wins {
-                if w.name == name {
-                    return w.id;
+        for col in &self.columns {
+            for win in &col.windows {
+                if win.name == name {
+                    return win.id;
                 }
             }
         }
-        let id = self.new_win(ci, name.clone());
+        let win_id = self.new_win(col_idx, name.clone());
         match Self::read_path(Path::new(&name)) {
-            Ok((s, is_dir)) => {
-                let w = self.win_mut(id).unwrap();
-                w.body.set_contents(&s);
-                w.is_dir = is_dir;
+            Ok((contents, is_dir)) => {
+                let win = self.win_mut(win_id).unwrap();
+                win.body.set_contents(&contents);
+                win.is_dir = is_dir;
             }
             Err(e) => {
                 let msg = format!("{name}: {e}");
-                self.error(Some(cwd()), Some(ci), &msg);
+                self.error(Some(cwd()), Some(col_idx), &msg);
             }
         }
         self.update_tags();
-        id
+        win_id
     }
 
     /// `Get [name]`: reload the window from disk. Refused once if dirty.
-    pub(super) fn get(&mut self, id: usize, arg: &str) {
-        let Some((ci, _)) = self.find_win(id) else {
+    pub(super) fn get(&mut self, win_id: usize, arg: &str) {
+        let Some((col_idx, _)) = self.find_win(win_id) else {
             return;
         };
-        let w = self.win(id).unwrap();
-        let dir = w.dir();
-        if w.dirty() && w.warned != Some(w.body.seq) {
-            self.win_mut(id).unwrap().warned = Some(self.win(id).unwrap().body.seq);
-            let msg = format!("{}: file modified", self.win(id).unwrap().name);
-            self.error(Some(dir), Some(ci), &msg);
+        let win = self.win(win_id).unwrap();
+        let dir = win.dir();
+        if win.dirty() && win.warned_at_revision != Some(win.body.revision) {
+            let revision = win.body.revision;
+            let name = win.name.clone();
+            self.win_mut(win_id).unwrap().warned_at_revision = Some(revision);
+            let msg = format!("{name}: file modified");
+            self.error(Some(dir), Some(col_idx), &msg);
             return;
         }
         let name = if arg.is_empty() {
-            self.tag_name(id)
+            self.tag_name(win_id)
         } else {
             arg.to_string()
         };
         if name.is_empty() {
-            self.error(Some(dir), Some(ci), "no file name");
+            self.error(Some(dir), Some(col_idx), "no file name");
             return;
         }
         let path = if Path::new(&name).is_absolute() {
@@ -121,39 +126,39 @@ impl Editor {
         };
         let name = clean_path(&path);
         match Self::read_path(&path) {
-            Ok((s, is_dir)) => {
-                let w = self.win_mut(id).unwrap();
-                w.name = name;
-                w.is_dir = is_dir;
-                w.body.set_contents(&s);
-                w.origin = 0;
-                w.warned = None;
+            Ok((contents, is_dir)) => {
+                let win = self.win_mut(win_id).unwrap();
+                win.name = name;
+                win.is_dir = is_dir;
+                win.body.set_contents(&contents);
+                win.origin = 0;
+                win.warned_at_revision = None;
             }
             Err(e) => {
                 let msg = format!("{name}: {e}");
-                self.error(Some(dir), Some(ci), &msg);
+                self.error(Some(dir), Some(col_idx), &msg);
             }
         }
     }
 
     /// `Put [name]`: write the body to the file named in the tag (or `arg`).
-    pub(super) fn put(&mut self, id: usize, arg: &str) {
-        let Some((ci, _)) = self.find_win(id) else {
+    pub(super) fn put(&mut self, win_id: usize, arg: &str) {
+        let Some((col_idx, _)) = self.find_win(win_id) else {
             return;
         };
-        let w = self.win(id).unwrap();
-        let dir = w.dir();
-        if w.is_dir {
-            self.error(Some(dir), Some(ci), "cannot write a directory");
+        let win = self.win(win_id).unwrap();
+        let dir = win.dir();
+        if win.is_dir {
+            self.error(Some(dir), Some(col_idx), "cannot write a directory");
             return;
         }
         let name = if arg.is_empty() {
-            self.tag_name(id)
+            self.tag_name(win_id)
         } else {
             arg.to_string()
         };
         if name.is_empty() {
-            self.error(Some(dir), Some(ci), "no file name");
+            self.error(Some(dir), Some(col_idx), "no file name");
             return;
         }
         let path = if Path::new(&name).is_absolute() {
@@ -161,37 +166,40 @@ impl Editor {
         } else {
             dir.join(&name)
         };
-        let contents = self.win(id).unwrap().body.contents();
+        let contents = self.win(win_id).unwrap().body.contents();
         match std::fs::write(&path, contents) {
             Ok(()) => {
                 let name = clean_path(&path);
-                let w = self.win_mut(id).unwrap();
-                w.name = name;
-                w.body.mark_clean();
-                w.warned = None;
+                let win = self.win_mut(win_id).unwrap();
+                win.name = name;
+                win.body.mark_clean();
+                win.warned_at_revision = None;
             }
             Err(e) => {
                 let msg = format!("{}: {e}", path.display());
-                self.error(Some(dir), Some(ci), &msg);
+                self.error(Some(dir), Some(col_idx), &msg);
             }
         }
     }
 
     /// `Del` / `Delete`: close the window. Without `force` a dirty window
     /// is refused once.
-    pub(super) fn del(&mut self, id: usize, force: bool) {
-        let Some((ci, _)) = self.find_win(id) else {
+    pub(super) fn del(&mut self, win_id: usize, force: bool) {
+        let Some((col_idx, _)) = self.find_win(win_id) else {
             return;
         };
-        let w = self.win(id).unwrap();
-        if !force && (w.dirty() && !w.is_scratch()) && w.warned != Some(w.body.seq) {
-            let seq = w.body.seq;
-            let (dir, name) = (w.dir(), w.name.clone());
-            self.win_mut(id).unwrap().warned = Some(seq);
+        let win = self.win(win_id).unwrap();
+        if !force
+            && (win.dirty() && !win.is_scratch())
+            && win.warned_at_revision != Some(win.body.revision)
+        {
+            let revision = win.body.revision;
+            let (dir, name) = (win.dir(), win.name.clone());
+            self.win_mut(win_id).unwrap().warned_at_revision = Some(revision);
             let msg = format!("{name}: file modified");
-            self.error(Some(dir), Some(ci), &msg);
+            self.error(Some(dir), Some(col_idx), &msg);
             return;
         }
-        self.close_win(id);
+        self.close_win(win_id);
     }
 }

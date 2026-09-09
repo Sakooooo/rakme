@@ -5,165 +5,171 @@ use super::*;
 impl Editor {
     // --------------------------------------------------------- snarf buffer
 
-    fn set_snarf(&mut self, s: String) {
-        if let Some(cb) = &mut self.clipboard {
-            let _ = cb.set_text(s.clone());
+    fn set_snarf(&mut self, text: String) {
+        if let Some(clipboard) = &mut self.clipboard {
+            let _ = clipboard.set_text(text.clone());
         }
-        self.snarf = s;
+        self.snarf = text;
     }
 
     pub(super) fn get_snarf(&mut self) -> String {
-        if let Some(cb) = &mut self.clipboard
-            && let Ok(s) = cb.get_text()
+        if let Some(clipboard) = &mut self.clipboard
+            && let Ok(text) = clipboard.get_text()
         {
-            self.snarf = s;
+            self.snarf = text;
         }
         self.snarf.clone()
     }
 
     pub(super) fn cut(&mut self, id: TextId) {
-        let Some(t) = self.text(id) else {
+        let Some(text) = self.text(id) else {
             return;
         };
-        if t.q0 == t.q1 {
+        if text.sel_start == text.sel_end {
             return;
         }
-        let s = t.selection();
-        self.set_snarf(s);
-        let t = self.text_mut(id).unwrap();
-        t.delete(t.q0, t.q1);
+        let selected = text.selection();
+        self.set_snarf(selected);
+        let text = self.text_mut(id).unwrap();
+        text.delete(text.sel_start, text.sel_end);
         self.show_cursor(id);
     }
 
-    pub(super) fn snarf_sel(&mut self, id: TextId) {
-        if let Some(t) = self.text(id)
-            && t.q0 != t.q1
+    pub(super) fn snarf_selection(&mut self, id: TextId) {
+        if let Some(text) = self.text(id)
+            && text.sel_start != text.sel_end
         {
-            let s = t.selection();
-            self.set_snarf(s);
+            let selected = text.selection();
+            self.set_snarf(selected);
         }
     }
 
     pub(super) fn paste(&mut self, id: TextId) {
-        let s = self.get_snarf();
-        let Some(t) = self.text_mut(id) else {
+        let pasted = self.get_snarf();
+        let Some(text) = self.text_mut(id) else {
             return;
         };
-        t.replace(t.q0, t.q1, &s);
+        text.replace(text.sel_start, text.sel_end, &pasted);
         self.show_cursor(id);
     }
 
     pub(super) fn selection_text(&self, id: TextId) -> String {
-        self.text(id).map(|t| t.selection()).unwrap_or_default()
+        self.text(id)
+            .map(|text| text.selection())
+            .unwrap_or_default()
     }
 
     // ------------------------------------------------------------ keyboard
 
     /// Handle a key press in the focused text.
-    pub fn key(&mut self, k: Key) {
+    pub fn key(&mut self, key: Key) {
         let id = self.focus;
         if self.text(id).is_none() {
             return;
         }
         let is_body = matches!(id, TextId::Body(_));
-        let rows = self.geom(id).map(|g| g.rows).unwrap_or(1) as i64;
-        let typing = self.typing;
-        let t = self.text_mut(id).unwrap();
-        match k {
-            Key::Char(c) => {
-                let q0 = t.q0;
-                t.typed(c);
-                if typing.is_none_or(|(tid, _)| tid != id) {
-                    self.typing = Some((id, q0));
+        let rows = self.geom(id).map(|geom| geom.rows).unwrap_or(1) as i64;
+        let typing_start = self.typing_start;
+        let text = self.text_mut(id).unwrap();
+        match key {
+            Key::Char(ch) => {
+                let sel_start = text.sel_start;
+                text.typed(ch);
+                if typing_start.is_none_or(|(typing_id, _)| typing_id != id) {
+                    self.typing_start = Some((id, sel_start));
                 }
             }
             Key::Backspace | Key::Ctrl('h') => {
-                if t.q0 == t.q1 && t.q0 > 0 {
-                    t.delete(t.q0 - 1, t.q0);
+                if text.sel_start == text.sel_end && text.sel_start > 0 {
+                    text.delete(text.sel_start - 1, text.sel_start);
                 } else {
-                    t.delete(t.q0, t.q1);
+                    text.delete(text.sel_start, text.sel_end);
                 }
             }
             Key::Delete => {
-                if t.q0 == t.q1 && t.q1 < t.len() {
-                    t.delete(t.q0, t.q0 + 1);
+                if text.sel_start == text.sel_end && text.sel_end < text.len() {
+                    text.delete(text.sel_start, text.sel_start + 1);
                 } else {
-                    t.delete(t.q0, t.q1);
+                    text.delete(text.sel_start, text.sel_end);
                 }
             }
             Key::Ctrl('u') => {
-                let ls = t.line_start(t.q0);
-                t.delete(ls, t.q0);
+                let line_start = text.line_start(text.sel_start);
+                text.delete(line_start, text.sel_start);
             }
             Key::Ctrl('w') => {
-                let mut a = t.q0;
-                while a > 0 && t.at(a - 1).is_some_and(|c| c.is_whitespace() && c != '\n') {
-                    a -= 1;
+                let mut word_start = text.sel_start;
+                while word_start > 0
+                    && text
+                        .at(word_start - 1)
+                        .is_some_and(|ch| ch.is_whitespace() && ch != '\n')
+                {
+                    word_start -= 1;
                 }
-                while a > 0 && t.at(a - 1).is_some_and(is_word) {
-                    a -= 1;
+                while word_start > 0 && text.at(word_start - 1).is_some_and(is_word_char) {
+                    word_start -= 1;
                 }
-                t.delete(a, t.q0);
+                text.delete(word_start, text.sel_start);
             }
             Key::Ctrl('a') | Key::Home => {
-                let p = t.line_start(t.q0);
-                t.set_select(p, p);
+                let pos = text.line_start(text.sel_start);
+                text.set_select(pos, pos);
             }
             Key::Ctrl('e') | Key::End => {
-                let p = t.line_end(t.q1);
-                t.set_select(p, p);
+                let pos = text.line_end(text.sel_end);
+                text.set_select(pos, pos);
             }
             Key::Left => {
-                let p = if t.q0 == t.q1 {
-                    t.q0.saturating_sub(1)
+                let pos = if text.sel_start == text.sel_end {
+                    text.sel_start.saturating_sub(1)
                 } else {
-                    t.q0
+                    text.sel_start
                 };
-                t.set_select(p, p);
+                text.set_select(pos, pos);
             }
             Key::Right => {
-                let p = if t.q0 == t.q1 {
-                    (t.q1 + 1).min(t.len())
+                let pos = if text.sel_start == text.sel_end {
+                    (text.sel_end + 1).min(text.len())
                 } else {
-                    t.q1
+                    text.sel_end
                 };
-                t.set_select(p, p);
+                text.set_select(pos, pos);
             }
             Key::Up | Key::Down => {
-                let col = t.q0 - t.line_start(t.q0);
-                let target = if matches!(k, Key::Up) {
-                    let ls = t.line_start(t.q0);
-                    if ls == 0 {
+                let col_offset = text.sel_start - text.line_start(text.sel_start);
+                let target_line_start = if matches!(key, Key::Up) {
+                    let line_start = text.line_start(text.sel_start);
+                    if line_start == 0 {
                         return;
                     }
-                    t.line_start(ls - 1)
+                    text.line_start(line_start - 1)
                 } else {
-                    let le = t.line_end(t.q1);
-                    if le >= t.len() {
+                    let line_end = text.line_end(text.sel_end);
+                    if line_end >= text.len() {
                         return;
                     }
-                    le + 1
+                    line_end + 1
                 };
-                let p = (target + col).min(t.line_end(target));
-                t.set_select(p, p);
+                let pos = (target_line_start + col_offset).min(text.line_end(target_line_start));
+                text.set_select(pos, pos);
             }
             Key::PageUp | Key::PageDown => {
-                if let TextId::Body(w) = id {
-                    let n = if matches!(k, Key::PageUp) {
+                if let TextId::Body(win_id) = id {
+                    let delta = if matches!(key, Key::PageUp) {
                         -rows.max(1)
                     } else {
                         rows.max(1)
                     };
-                    self.scroll_by(w, n);
+                    self.scroll_by(win_id, delta);
                 }
                 return;
             }
             Key::Escape => {
-                if let Some((tid, start)) = typing
-                    && tid == id
-                    && start <= t.q0
+                if let Some((typing_id, start)) = typing_start
+                    && typing_id == id
+                    && start <= text.sel_start
                 {
-                    t.set_select(start, t.q0);
+                    text.set_select(start, text.sel_start);
                 }
                 return;
             }

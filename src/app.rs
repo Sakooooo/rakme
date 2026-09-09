@@ -12,7 +12,7 @@ use winit::{
     window::Window,
 };
 
-use crate::editor::{Editor, Key as EKey};
+use crate::editor::{Editor, Key as EditorKey};
 use crate::exec;
 use crate::font::Font;
 
@@ -22,9 +22,11 @@ pub struct App {
     editor: Option<Editor>,
     proxy: EventLoopProxy<exec::Result>,
     files: Vec<String>,
-    cursor: (i32, i32),
-    ctrl: bool,
-    screenshot: Option<PathBuf>,
+    /// Last known mouse pointer position, in window pixels.
+    mouse_pos: (i32, i32),
+    ctrl_held: bool,
+    /// If set, save one frame here and exit (`RAKME_SCREENSHOT`).
+    screenshot_path: Option<PathBuf>,
 }
 
 impl App {
@@ -35,9 +37,9 @@ impl App {
             editor: None,
             proxy,
             files,
-            cursor: (0, 0),
-            ctrl: false,
-            screenshot: std::env::var_os("RAKME_SCREENSHOT").map(PathBuf::from),
+            mouse_pos: (0, 0),
+            ctrl_held: false,
+            screenshot_path: std::env::var_os("RAKME_SCREENSHOT").map(PathBuf::from),
         }
     }
 
@@ -56,7 +58,7 @@ impl App {
         let mut pixmap = Pixmap::new(size.width, size.height).unwrap();
         editor.draw(&mut pixmap);
 
-        if let Some(path) = self.screenshot.take() {
+        if let Some(path) = self.screenshot_path.take() {
             if let Err(e) = pixmap.save_png(&path) {
                 eprintln!("screenshot: {e}");
             }
@@ -81,20 +83,20 @@ impl App {
             event_loop.exit();
             return;
         }
-        for req in editor.pending.drain(..) {
+        for request in editor.pending_commands.drain(..) {
             let proxy = self.proxy.clone();
-            exec::spawn(req, move |r| {
-                let _ = proxy.send_event(r);
+            exec::spawn(request, move |result| {
+                let _ = proxy.send_event(result);
             });
         }
         if let Some((x, y)) = editor.warp.take()
-            && let Some(w) = &self.window
+            && let Some(window) = &self.window
         {
-            let _ = w.set_cursor_position(PhysicalPosition::new(x, y));
-            self.cursor = (x, y);
+            let _ = window.set_cursor_position(PhysicalPosition::new(x, y));
+            self.mouse_pos = (x, y);
         }
-        if let Some(w) = &self.window {
-            w.request_redraw();
+        if let Some(window) = &self.window {
+            window.request_redraw();
         }
     }
 
@@ -102,32 +104,33 @@ impl App {
         let Some(editor) = self.editor.as_mut() else {
             return;
         };
-        let k = match &event.logical_key {
-            Key::Named(NamedKey::Backspace) => Some(EKey::Backspace),
-            Key::Named(NamedKey::Delete) => Some(EKey::Delete),
-            Key::Named(NamedKey::ArrowLeft) => Some(EKey::Left),
-            Key::Named(NamedKey::ArrowRight) => Some(EKey::Right),
-            Key::Named(NamedKey::ArrowUp) => Some(EKey::Up),
-            Key::Named(NamedKey::ArrowDown) => Some(EKey::Down),
-            Key::Named(NamedKey::Home) => Some(EKey::Home),
-            Key::Named(NamedKey::End) => Some(EKey::End),
-            Key::Named(NamedKey::PageUp) => Some(EKey::PageUp),
-            Key::Named(NamedKey::PageDown) => Some(EKey::PageDown),
-            Key::Named(NamedKey::Escape) => Some(EKey::Escape),
-            Key::Named(NamedKey::Enter) => Some(EKey::Char('\n')),
-            Key::Named(NamedKey::Tab) => Some(EKey::Char('\t')),
-            Key::Character(s) if self.ctrl => {
-                s.chars().next().map(|c| EKey::Ctrl(c.to_ascii_lowercase()))
-            }
+        let key = match &event.logical_key {
+            Key::Named(NamedKey::Backspace) => Some(EditorKey::Backspace),
+            Key::Named(NamedKey::Delete) => Some(EditorKey::Delete),
+            Key::Named(NamedKey::ArrowLeft) => Some(EditorKey::Left),
+            Key::Named(NamedKey::ArrowRight) => Some(EditorKey::Right),
+            Key::Named(NamedKey::ArrowUp) => Some(EditorKey::Up),
+            Key::Named(NamedKey::ArrowDown) => Some(EditorKey::Down),
+            Key::Named(NamedKey::Home) => Some(EditorKey::Home),
+            Key::Named(NamedKey::End) => Some(EditorKey::End),
+            Key::Named(NamedKey::PageUp) => Some(EditorKey::PageUp),
+            Key::Named(NamedKey::PageDown) => Some(EditorKey::PageDown),
+            Key::Named(NamedKey::Escape) => Some(EditorKey::Escape),
+            Key::Named(NamedKey::Enter) => Some(EditorKey::Char('\n')),
+            Key::Named(NamedKey::Tab) => Some(EditorKey::Char('\t')),
+            Key::Character(text) if self.ctrl_held => text
+                .chars()
+                .next()
+                .map(|ch| EditorKey::Ctrl(ch.to_ascii_lowercase())),
             _ => None,
         };
-        match k {
-            Some(k) => editor.key(k),
-            None if !self.ctrl => {
+        match key {
+            Some(key) => editor.key(key),
+            None if !self.ctrl_held => {
                 if let Some(text) = &event.text {
-                    for c in text.chars() {
-                        if !c.is_control() {
-                            editor.key(EKey::Char(c));
+                    for ch in text.chars() {
+                        if !ch.is_control() {
+                            editor.key(EditorKey::Char(ch));
                         }
                     }
                 }
@@ -142,20 +145,20 @@ impl ApplicationHandler<exec::Result> for App {
         if self.window.is_some() {
             return;
         }
-        let attrs = Window::default_attributes()
+        let attributes = Window::default_attributes()
             .with_title("rakme")
             .with_inner_size(LogicalSize::new(1024.0, 768.0));
-        let window = Arc::new(event_loop.create_window(attrs).unwrap());
+        let window = Arc::new(event_loop.create_window(attributes).unwrap());
         let size = window.inner_size();
         let surface = SurfaceTexture::new(size.width, size.height, window.clone());
         self.pixels = Some(Pixels::new(size.width.max(1), size.height.max(1), surface).unwrap());
 
         let font_size = std::env::var("RAKME_FONT_SIZE")
             .ok()
-            .and_then(|s| s.parse().ok())
+            .and_then(|value| value.parse().ok())
             .unwrap_or(14.0);
         let font = match Font::load(font_size) {
-            Ok(f) => f,
+            Ok(font) => font,
             Err(e) => {
                 eprintln!("rakme: {e}");
                 event_loop.exit();
@@ -171,9 +174,9 @@ impl ApplicationHandler<exec::Result> for App {
         self.window = Some(window);
     }
 
-    fn user_event(&mut self, event_loop: &ActiveEventLoop, r: exec::Result) {
-        if let Some(ed) = self.editor.as_mut() {
-            ed.exec_done(r);
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, result: exec::Result) {
+        if let Some(editor) = self.editor.as_mut() {
+            editor.exec_done(result);
         }
         self.after_event(event_loop);
     }
@@ -193,35 +196,37 @@ impl ApplicationHandler<exec::Result> for App {
                     let _ = pixels.resize_surface(size.width, size.height);
                     let _ = pixels.resize_buffer(size.width, size.height);
                 }
-                if let Some(ed) = self.editor.as_mut() {
-                    ed.resize(size.width as i32, size.height as i32);
+                if let Some(editor) = self.editor.as_mut() {
+                    editor.resize(size.width as i32, size.height as i32);
                 }
-                if let Some(w) = &self.window {
-                    w.request_redraw();
+                if let Some(window) = &self.window {
+                    window.request_redraw();
                 }
             }
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::RedrawRequested => self.draw(event_loop),
-            WindowEvent::ModifiersChanged(m) => self.ctrl = m.state().control_key(),
+            WindowEvent::ModifiersChanged(modifiers) => {
+                self.ctrl_held = modifiers.state().control_key()
+            }
             WindowEvent::CursorMoved { position, .. } => {
-                self.cursor = (position.x as i32, position.y as i32);
-                if let Some(ed) = self.editor.as_mut() {
-                    ed.mouse_move(self.cursor.0, self.cursor.1);
+                self.mouse_pos = (position.x as i32, position.y as i32);
+                if let Some(editor) = self.editor.as_mut() {
+                    editor.mouse_move(self.mouse_pos.0, self.mouse_pos.1);
                 }
                 self.after_event(event_loop);
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                let btn = match button {
+                let button = match button {
                     MouseButton::Left => 1,
                     MouseButton::Middle => 2,
                     MouseButton::Right => 3,
                     _ => return,
                 };
-                let (x, y) = self.cursor;
-                if let Some(ed) = self.editor.as_mut() {
+                let (x, y) = self.mouse_pos;
+                if let Some(editor) = self.editor.as_mut() {
                     match state {
-                        ElementState::Pressed => ed.mouse_press(btn, x, y),
-                        ElementState::Released => ed.mouse_release(btn, x, y),
+                        ElementState::Pressed => editor.mouse_press(button, x, y),
+                        ElementState::Released => editor.mouse_release(button, x, y),
                     }
                 }
                 self.after_event(event_loop);
@@ -229,14 +234,18 @@ impl ApplicationHandler<exec::Result> for App {
             WindowEvent::MouseWheel { delta, .. } => {
                 let lines = match delta {
                     MouseScrollDelta::LineDelta(_, y) => (-y * 3.0).round() as i64,
-                    MouseScrollDelta::PixelDelta(p) => {
-                        let lh = self.editor.as_ref().map(|e| e.font.line_h).unwrap_or(16) as f64;
-                        (-p.y / lh).round() as i64
+                    MouseScrollDelta::PixelDelta(pixel_delta) => {
+                        let line_height = self
+                            .editor
+                            .as_ref()
+                            .map(|editor| editor.font.line_height)
+                            .unwrap_or(16) as f64;
+                        (-pixel_delta.y / line_height).round() as i64
                     }
                 };
-                let (x, y) = self.cursor;
-                if let Some(ed) = self.editor.as_mut() {
-                    ed.wheel(x, y, lines);
+                let (x, y) = self.mouse_pos;
+                if let Some(editor) = self.editor.as_mut() {
+                    editor.wheel(x, y, lines);
                 }
                 self.after_event(event_loop);
             }

@@ -3,20 +3,21 @@ use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc};
 use ab_glyph::{Font as _, FontArc, PxScale, ScaleFont, point};
 
 pub struct Glyph {
-    pub w: usize,
-    pub h: usize,
+    pub width: usize,
+    pub height: usize,
     /// Offset of the bitmap from the cell's top-left corner.
-    pub x: i32,
-    pub y: i32,
-    pub cov: Vec<u8>,
+    pub offset_x: i32,
+    pub offset_y: i32,
+    /// Coverage (alpha) per pixel, row-major, `width * height` bytes.
+    pub coverage: Vec<u8>,
 }
 
 pub struct Font {
     font: FontArc,
     pub size: f32,
     /// Advance width of one cell (the font is assumed monospace).
-    pub adv: i32,
-    pub line_h: i32,
+    pub cell_width: i32,
+    pub line_height: i32,
     pub ascent: i32,
     cache: RefCell<HashMap<char, Rc<Glyph>>>,
 }
@@ -37,18 +38,18 @@ impl Font {
     }
 
     fn from_arc(font: FontArc, size: f32) -> Font {
-        let s = font.as_scaled(PxScale::from(size));
-        let ascent = s.ascent();
-        let line_h = (ascent - s.descent() + s.line_gap()).ceil() as i32;
-        let mut adv = s.h_advance(font.glyph_id('M')).round() as i32;
-        if adv <= 0 {
-            adv = (size * 0.6).round() as i32;
+        let scaled = font.as_scaled(PxScale::from(size));
+        let ascent = scaled.ascent();
+        let line_height = (ascent - scaled.descent() + scaled.line_gap()).ceil() as i32;
+        let mut cell_width = scaled.h_advance(font.glyph_id('M')).round() as i32;
+        if cell_width <= 0 {
+            cell_width = (size * 0.6).round() as i32;
         }
         Font {
             font,
             size,
-            adv: adv.max(1),
-            line_h: line_h.max(1),
+            cell_width: cell_width.max(1),
+            line_height: line_height.max(1),
             ascent: ascent.round() as i32,
             cache: RefCell::new(HashMap::new()),
         }
@@ -58,53 +59,53 @@ impl Font {
         Font::from_arc(self.font.clone(), size)
     }
 
-    pub fn glyph(&self, c: char) -> Rc<Glyph> {
-        if let Some(g) = self.cache.borrow().get(&c) {
-            return g.clone();
+    pub fn glyph(&self, ch: char) -> Rc<Glyph> {
+        if let Some(glyph) = self.cache.borrow().get(&ch) {
+            return glyph.clone();
         }
-        let g = Rc::new(self.rasterize(c));
-        self.cache.borrow_mut().insert(c, g.clone());
-        g
+        let glyph = Rc::new(self.rasterize(ch));
+        self.cache.borrow_mut().insert(ch, glyph.clone());
+        glyph
     }
 
-    fn rasterize(&self, c: char) -> Glyph {
-        let s = self.font.as_scaled(PxScale::from(self.size));
-        let mut g = s.scaled_glyph(c);
-        g.position = point(0.0, self.ascent as f32);
-        let Some(og) = self.font.outline_glyph(g) else {
+    fn rasterize(&self, ch: char) -> Glyph {
+        let scaled = self.font.as_scaled(PxScale::from(self.size));
+        let mut glyph = scaled.scaled_glyph(ch);
+        glyph.position = point(0.0, self.ascent as f32);
+        let Some(outlined) = self.font.outline_glyph(glyph) else {
             return Glyph {
-                w: 0,
-                h: 0,
-                x: 0,
-                y: 0,
-                cov: vec![],
+                width: 0,
+                height: 0,
+                offset_x: 0,
+                offset_y: 0,
+                coverage: vec![],
             };
         };
-        let b = og.px_bounds();
-        let w = b.width().ceil().max(0.0) as usize;
-        let h = b.height().ceil().max(0.0) as usize;
-        let mut cov = vec![0u8; w * h];
-        og.draw(|x, y, a| {
+        let bounds = outlined.px_bounds();
+        let width = bounds.width().ceil().max(0.0) as usize;
+        let height = bounds.height().ceil().max(0.0) as usize;
+        let mut coverage = vec![0u8; width * height];
+        outlined.draw(|x, y, alpha| {
             let (x, y) = (x as usize, y as usize);
-            if x < w && y < h {
-                cov[y * w + x] = (a.clamp(0.0, 1.0) * 255.0) as u8;
+            if x < width && y < height {
+                coverage[y * width + x] = (alpha.clamp(0.0, 1.0) * 255.0) as u8;
             }
         });
         Glyph {
-            w,
-            h,
-            x: b.min.x as i32,
-            y: b.min.y as i32,
-            cov,
+            width,
+            height,
+            offset_x: bounds.min.x as i32,
+            offset_y: bounds.min.y as i32,
+            coverage,
         }
     }
 }
 
 fn find_font() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("RAKME_FONT") {
-        let p = PathBuf::from(p);
-        if p.is_file() {
-            return Some(p);
+    if let Ok(env_path) = std::env::var("RAKME_FONT") {
+        let path = PathBuf::from(env_path);
+        if path.is_file() {
+            return Some(path);
         }
     }
     let candidates: &[&str] = &[
@@ -122,31 +123,31 @@ fn find_font() -> Option<PathBuf> {
         "/System/Library/Fonts/Monaco.ttf",
         "/Library/Fonts/Courier New.ttf",
     ];
-    for c in candidates {
-        let p = PathBuf::from(c);
-        if p.is_file() {
-            return Some(p);
+    for candidate in candidates {
+        let path = PathBuf::from(candidate);
+        if path.is_file() {
+            return Some(path);
         }
     }
     if let Ok(home) = std::env::var("HOME") {
-        for c in [
+        for candidate in [
             ".nix-profile/share/fonts/truetype/DejaVuSansMono.ttf",
             ".local/share/fonts/DejaVuSansMono.ttf",
         ] {
-            let p = PathBuf::from(&home).join(c);
-            if p.is_file() {
-                return Some(p);
+            let path = PathBuf::from(&home).join(candidate);
+            if path.is_file() {
+                return Some(path);
             }
         }
     }
     // Last resort: ask fontconfig.
-    if let Ok(out) = std::process::Command::new("fc-match")
+    if let Ok(output) = std::process::Command::new("fc-match")
         .args(["-f", "%{file}", "monospace"])
         .output()
     {
-        let p = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
-        if p.is_file() {
-            return Some(p);
+        let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+        if path.is_file() {
+            return Some(path);
         }
     }
     None

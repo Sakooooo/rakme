@@ -11,6 +11,10 @@
 //! - `commands`: built-in commands and shell execution
 //! - `look`: button 3 (files, addresses, search)
 //! - `draw`: painting everything into a pixmap
+//!
+//! Naming: `win_id` / `col_id` are stable ids that survive re-layout;
+//! `win_idx` / `col_idx` are positions in the current `windows` / `columns`
+//! vectors.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -21,7 +25,7 @@ use crate::exec::{self, Kind};
 use crate::font::Font;
 use crate::frame::{self, Geom, Style};
 use crate::gfx::{self, Rect};
-use crate::text::{Text, is_filec, is_word};
+use crate::text::{Text, is_filename_char, is_word_char};
 
 mod commands;
 mod draw;
@@ -35,11 +39,12 @@ mod tests;
 mod windows;
 
 /// Width of the scrollbar / box column on the left of every window.
-pub const SB_W: i32 = 12;
+pub const SCROLLBAR_W: i32 = 12;
 const TEXT_PAD: i32 = 4;
 const TAG_PAD: i32 = 2;
-const DCLICK: Duration = Duration::from_millis(400);
+const DOUBLE_CLICK_TIME: Duration = Duration::from_millis(400);
 
+/// Identifies one of the editable texts on screen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextId {
     Row,
@@ -53,12 +58,15 @@ pub struct Window {
     pub name: String,
     pub tag: Text,
     pub body: Text,
+    /// Character index of the first visible body character.
     pub origin: usize,
-    pub tab: usize,
-    pub y0: i32,
+    pub tab_width: usize,
+    /// Y pixel of the window's top edge.
+    pub top: i32,
     pub is_dir: bool,
-    /// Body sequence number at which a Del/Get on a dirty window was refused.
-    warned: Option<u64>,
+    /// Body revision at which a Del/Get on a dirty window was refused, so
+    /// the second attempt goes through.
+    warned_at_revision: Option<u64>,
 }
 
 impl Window {
@@ -70,10 +78,10 @@ impl Window {
             tag: Text::new(),
             body: Text::new(),
             origin: 0,
-            tab: 4,
-            y0: 0,
+            tab_width: 4,
+            top: 0,
             is_dir,
-            warned: None,
+            warned_at_revision: None,
         }
     }
 
@@ -86,8 +94,8 @@ impl Window {
         }
         Path::new(&self.name)
             .parent()
-            .map(|p| p.to_path_buf())
-            .filter(|p| !p.as_os_str().is_empty())
+            .map(|parent| parent.to_path_buf())
+            .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or_else(cwd)
     }
 
@@ -103,11 +111,13 @@ impl Window {
 
 pub struct Column {
     pub id: usize,
-    pub x0: i32,
+    /// X pixel of the column's left edge.
+    pub left: i32,
     pub tag: Text,
-    pub wins: Vec<Window>,
+    pub windows: Vec<Window>,
 }
 
+/// What is under a point on screen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Hit {
     Nothing,
@@ -120,17 +130,20 @@ pub enum Hit {
     WinBody(usize, usize),
 }
 
+/// The rectangles making up one window on screen.
 pub struct WinRects {
-    pub all: Rect,
-    pub bx: Rect,
+    pub whole: Rect,
+    /// The small square at the top-left that shows the dirty state.
+    pub dirty_box: Rect,
     pub tag: Rect,
     pub tag_text: Rect,
     pub tag_rows: usize,
-    pub sb: Rect,
+    pub scrollbar: Rect,
     pub body: Rect,
     pub body_text: Rect,
 }
 
+/// What a held mouse button is currently doing.
 #[derive(Clone, Copy, Debug, Default)]
 enum Action {
     #[default]
@@ -141,30 +154,34 @@ enum Action {
     Sweep {
         id: TextId,
         anchor: usize,
-        btn: u8,
-        q0: usize,
-        q1: usize,
+        button: u8,
+        start: usize,
+        end: usize,
     },
     WinBox {
-        win: usize,
-        sx: i32,
-        sy: i32,
+        win_id: usize,
+        press_x: i32,
+        press_y: i32,
     },
     ColBox {
-        col: usize,
-        sx: i32,
+        col_id: usize,
+        press_x: i32,
     },
 }
 
 #[derive(Default)]
 struct Mouse {
-    buttons: u8,
+    /// Bitmask of held buttons: bit 0 is button 1, and so on.
+    held_buttons: u8,
     x: i32,
     y: i32,
     action: Action,
     last_click: Option<(Instant, TextId, usize)>,
+    /// A chord (cut/paste) happened during this press, so the release
+    /// should not execute or look.
     chorded: bool,
-    arg: Option<String>,
+    /// Argument captured by a 2-1 chord, appended to the executed command.
+    chord_arg: Option<String>,
 }
 
 pub enum Key {
@@ -185,96 +202,102 @@ pub enum Key {
 
 pub struct Editor {
     pub font: Font,
-    pub w: i32,
-    pub h: i32,
+    pub width: i32,
+    pub height: i32,
     pub row_tag: Text,
-    pub cols: Vec<Column>,
+    pub columns: Vec<Column>,
     next_id: usize,
+    /// acme's name for the cut/paste buffer.
     snarf: String,
     clipboard: Option<arboard::Clipboard>,
     pub focus: TextId,
     mouse: Mouse,
-    typing: Option<(TextId, usize)>,
+    /// Where the current run of typing began, so Escape can select it.
+    typing_start: Option<(TextId, usize)>,
     /// Pointer warp requested by a search.
     pub warp: Option<(i32, i32)>,
     pub quit: bool,
     exit_warned: bool,
-    pub pending: Vec<exec::Request>,
+    /// Shell commands waiting for `App` to spawn them.
+    pub pending_commands: Vec<exec::Request>,
 }
 
 fn cwd() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
-fn clean_path(p: &Path) -> String {
-    let abs = std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
-    let mut out = PathBuf::new();
-    for c in abs.components() {
-        match c {
+/// Absolute, normalised, forward-slashed path; directories get a trailing `/`.
+fn clean_path(path: &Path) -> String {
+    let abs = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut cleaned = PathBuf::new();
+    for component in abs.components() {
+        match component {
             std::path::Component::CurDir => {}
             std::path::Component::ParentDir => {
-                out.pop();
+                cleaned.pop();
             }
-            other => out.push(other.as_os_str()),
+            other => cleaned.push(other.as_os_str()),
         }
     }
-    let mut s = out.to_string_lossy().replace('\\', "/");
-    if out.is_dir() && !s.ends_with('/') {
-        s.push('/');
+    let mut result = cleaned.to_string_lossy().replace('\\', "/");
+    if cleaned.is_dir() && !result.ends_with('/') {
+        result.push('/');
     }
-    s
+    result
 }
 
-fn dir_string(p: &Path) -> String {
-    let mut s = clean_path(p);
-    while s.len() > 1 && s.ends_with('/') {
-        s.pop();
+/// Like `clean_path` but without the trailing `/`.
+fn dir_string(path: &Path) -> String {
+    let mut result = clean_path(path);
+    while result.len() > 1 && result.ends_with('/') {
+        result.pop();
     }
-    s
+    result
 }
 
-fn split_cmd(s: &str) -> (&str, &str) {
-    let s = s.trim();
-    match s.find(char::is_whitespace) {
-        Some(i) => (&s[..i], s[i..].trim()),
-        None => (s, ""),
+/// Split a command line into its name and the rest.
+fn split_command(line: &str) -> (&str, &str) {
+    let line = line.trim();
+    match line.find(char::is_whitespace) {
+        Some(space) => (&line[..space], line[space..].trim()),
+        None => (line, ""),
     }
 }
 
 impl Editor {
-    pub fn new(font: Font, w: i32, h: i32, files: &[String]) -> Editor {
-        let mut ed = Editor {
+    pub fn new(font: Font, width: i32, height: i32, files: &[String]) -> Editor {
+        let mut editor = Editor {
             font,
-            w,
-            h,
+            width,
+            height,
             row_tag: Text::from_str("Newcol Putall Exit "),
-            cols: Vec::new(),
+            columns: Vec::new(),
             next_id: 1,
             snarf: String::new(),
             clipboard: arboard::Clipboard::new().ok(),
             focus: TextId::Row,
             mouse: Mouse::default(),
-            typing: None,
+            typing_start: None,
             warp: None,
             quit: false,
             exit_warned: false,
-            pending: Vec::new(),
+            pending_commands: Vec::new(),
         };
-        ed.new_col(0);
-        ed.new_col(0);
-        let ci = ed.cols.len() - 1;
+        editor.new_col(0);
+        editor.new_col(0);
+        let col_idx = editor.columns.len() - 1;
         if files.is_empty() {
-            let id = ed.open_file(&cwd(), ci);
-            ed.focus = TextId::Body(id);
+            let win_id = editor.open_file(&cwd(), col_idx);
+            editor.focus = TextId::Body(win_id);
         } else {
-            for f in files {
-                let id = ed.open_file(Path::new(f), ci);
-                ed.focus = TextId::Body(id);
+            for file in files {
+                let win_id = editor.open_file(Path::new(file), col_idx);
+                editor.focus = TextId::Body(win_id);
             }
         }
-        ed.fix_layout();
-        ed.update_tags();
-        ed
+        editor.fix_layout();
+        editor.update_tags();
+        editor
     }
 
     fn alloc_id(&mut self) -> usize {

@@ -17,70 +17,74 @@ pub enum Kind {
 }
 
 pub struct Request {
-    pub cmd: String,
+    pub command: String,
     pub dir: PathBuf,
+    /// Text fed to the command's stdin, if any.
     pub input: Option<String>,
     pub kind: Kind,
-    pub win: Option<usize>,
-    pub col: Option<usize>,
-    pub range: (usize, usize),
+    /// Id of the window the command was run from, if any.
+    pub win_id: Option<usize>,
+    /// Id of the column the command was run from, if any.
+    pub col_id: Option<usize>,
+    /// The selection the output should replace (for `Pipe` and `Input`).
+    pub sel_range: (usize, usize),
     pub env: Vec<(String, String)>,
 }
 
 pub struct Result {
     pub kind: Kind,
-    pub win: Option<usize>,
-    pub col: Option<usize>,
+    pub win_id: Option<usize>,
+    pub col_id: Option<usize>,
     pub dir: PathBuf,
-    pub range: (usize, usize),
-    pub out: String,
-    pub err: String,
+    pub sel_range: (usize, usize),
+    pub stdout: String,
+    pub stderr: String,
 }
 
-pub fn spawn(req: Request, done: impl FnOnce(Result) + Send + 'static) {
+pub fn spawn(request: Request, done: impl FnOnce(Result) + Send + 'static) {
     std::thread::spawn(move || {
-        let (out, err) = run(&req);
+        let (stdout, stderr) = run(&request);
         done(Result {
-            kind: req.kind,
-            win: req.win,
-            col: req.col,
-            dir: req.dir,
-            range: req.range,
-            out,
-            err,
+            kind: request.kind,
+            win_id: request.win_id,
+            col_id: request.col_id,
+            dir: request.dir,
+            sel_range: request.sel_range,
+            stdout,
+            stderr,
         });
     });
 }
 
-fn run(req: &Request) -> (String, String) {
-    let mut c = if cfg!(windows) {
-        let mut c = Command::new("cmd");
-        c.args(["/C", &req.cmd]);
-        c
+fn run(request: &Request) -> (String, String) {
+    let mut command = if cfg!(windows) {
+        let mut command = Command::new("cmd");
+        command.args(["/C", &request.command]);
+        command
     } else {
-        let sh = std::env::var("SHELL").unwrap_or_else(|_| "sh".into());
-        let mut c = Command::new(sh);
-        c.args(["-c", &req.cmd]);
-        c
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".into());
+        let mut command = Command::new(shell);
+        command.args(["-c", &request.command]);
+        command
     };
-    if req.dir.is_dir() {
-        c.current_dir(&req.dir);
+    if request.dir.is_dir() {
+        command.current_dir(&request.dir);
     }
-    for (k, v) in &req.env {
-        c.env(k, v);
+    for (key, value) in &request.env {
+        command.env(key, value);
     }
-    c.stdin(if req.input.is_some() {
+    command.stdin(if request.input.is_some() {
         Stdio::piped()
     } else {
         Stdio::null()
     });
-    c.stdout(Stdio::piped());
-    c.stderr(Stdio::piped());
-    let mut child = match c.spawn() {
-        Ok(ch) => ch,
-        Err(e) => return (String::new(), format!("{}: {e}\n", req.cmd)),
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(e) => return (String::new(), format!("{}: {e}\n", request.command)),
     };
-    if let Some(input) = &req.input
+    if let Some(input) = &request.input
         && let Some(mut stdin) = child.stdin.take()
     {
         let input = input.clone();
@@ -89,10 +93,10 @@ fn run(req: &Request) -> (String, String) {
         });
     }
     match child.wait_with_output() {
-        Ok(o) => (
-            String::from_utf8_lossy(&o.stdout).into_owned(),
-            String::from_utf8_lossy(&o.stderr).into_owned(),
+        Ok(output) => (
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
         ),
-        Err(e) => (String::new(), format!("{}: {e}\n", req.cmd)),
+        Err(e) => (String::new(), format!("{}: {e}\n", request.command)),
     }
 }
