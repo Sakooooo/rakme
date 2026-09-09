@@ -1,0 +1,6 @@
+figure out why it's slow as shit
+possibly move to another library for rendering
+configuration (we're breaking the philosophy oh no!)
+colorschemes
+treesitter syntax highlighting
+desloppify tests
