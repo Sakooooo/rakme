@@ -21,7 +21,9 @@ impl Editor {
     }
 
     fn tag_rows(&self, t: &Text, width: i32) -> usize {
-        frame::wrap(t, 0, self.tag_cols(width), 3, 4, false).len().max(1)
+        frame::wrap(t, 0, self.tag_cols(width), 3, 4, false)
+            .len()
+            .max(1)
     }
 
     pub(super) fn row_h(&self) -> i32 {
@@ -60,8 +62,22 @@ impl Editor {
         let tag_text = Rect::new(cr.x + SB_W + 2, y0 + TAG_PAD, cr.w - SB_W - 4, text_h);
         let body = Rect::new(cr.x, y0 + th, cr.w, y1 - y0 - th);
         let sb = Rect::new(cr.x, body.y, SB_W, body.h);
-        let body_text = Rect::new(cr.x + SB_W + TEXT_PAD, body.y, cr.w - SB_W - TEXT_PAD - 2, body.h);
-        WinRects { all, bx, tag, tag_text, tag_rows, sb, body, body_text }
+        let body_text = Rect::new(
+            cr.x + SB_W + TEXT_PAD,
+            body.y,
+            cr.w - SB_W - TEXT_PAD - 2,
+            body.h,
+        );
+        WinRects {
+            all,
+            bx,
+            tag,
+            tag_text,
+            tag_rows,
+            sb,
+            body,
+            body_text,
+        }
     }
 
     pub fn resize(&mut self, w: i32, h: i32) {
@@ -132,7 +148,11 @@ impl Editor {
             }
             let ct = self.col_tag_rect(ci);
             if ct.contains(x, y) {
-                return if x < cr.x + SB_W { Hit::ColBox(ci) } else { Hit::ColTag(ci) };
+                return if x < cr.x + SB_W {
+                    Hit::ColBox(ci)
+                } else {
+                    Hit::ColTag(ci)
+                };
             }
             for wi in 0..self.cols[ci].wins.len() {
                 let r = self.win_rects(ci, wi);
@@ -140,7 +160,11 @@ impl Editor {
                     continue;
                 }
                 if r.tag.contains(x, y) {
-                    return if x < cr.x + SB_W { Hit::WinBox(ci, wi) } else { Hit::WinTag(ci, wi) };
+                    return if x < cr.x + SB_W {
+                        Hit::WinBox(ci, wi)
+                    } else {
+                        Hit::WinTag(ci, wi)
+                    };
                 }
                 if x < cr.x + SB_W {
                     return Hit::WinScroll(ci, wi);
@@ -215,7 +239,9 @@ impl Editor {
             Hit::RowTag => TextId::Row,
             Hit::ColTag(ci) | Hit::ColBox(ci) => TextId::ColTag(self.cols[ci].id),
             Hit::WinTag(ci, wi) | Hit::WinBox(ci, wi) => TextId::Tag(self.cols[ci].wins[wi].id),
-            Hit::WinBody(ci, wi) | Hit::WinScroll(ci, wi) => TextId::Body(self.cols[ci].wins[wi].id),
+            Hit::WinBody(ci, wi) | Hit::WinScroll(ci, wi) => {
+                TextId::Body(self.cols[ci].wins[wi].id)
+            }
             Hit::Nothing => return None,
         })
     }
@@ -223,7 +249,12 @@ impl Editor {
     pub fn geom(&self, id: TextId) -> Option<Geom> {
         Some(match id {
             TextId::Row => Geom {
-                rect: Rect::new(SB_W + 2, TAG_PAD, self.w - SB_W - 4, self.row_h() - 2 * TAG_PAD - 1),
+                rect: Rect::new(
+                    SB_W + 2,
+                    TAG_PAD,
+                    self.w - SB_W - 4,
+                    self.row_h() - 2 * TAG_PAD - 1,
+                ),
                 origin: 0,
                 cols: self.tag_cols(self.w),
                 rows: self.tag_rows(&self.row_tag, self.w),
@@ -234,7 +265,12 @@ impl Editor {
                 let cr = self.col_rect(ci);
                 let rows = self.tag_rows(&self.cols[ci].tag, cr.w);
                 Geom {
-                    rect: Rect::new(cr.x + SB_W + 2, cr.y + TAG_PAD, cr.w - SB_W - 4, rows as i32 * self.font.line_h),
+                    rect: Rect::new(
+                        cr.x + SB_W + 2,
+                        cr.y + TAG_PAD,
+                        cr.w - SB_W - 4,
+                        rows as i32 * self.font.line_h,
+                    ),
                     origin: 0,
                     cols: self.tag_cols(cr.w),
                     rows,
@@ -308,7 +344,11 @@ impl Editor {
     pub(super) fn show_cursor(&mut self, id: TextId) {
         if let TextId::Body(w) = id {
             let q = self.text(id).map(|t| t.q1).unwrap_or(0);
-            let above = if q < self.win(w).map(|w| w.origin).unwrap_or(0) { 0.25 } else { 0.75 };
+            let above = if q < self.win(w).map(|w| w.origin).unwrap_or(0) {
+                0.25
+            } else {
+                0.75
+            };
             self.show(w, q, above);
         }
     }

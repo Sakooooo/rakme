@@ -333,9 +333,10 @@ impl Text {
         let prev_char = self.buf.get_char(p - 1);
         if let Some(cc) = current_char
             && let Some(pc) = prev_char
- 			&& (is_word(cc) || (p > 0 && is_word(pc))) {
-           	return self.expand(p, is_word);
-		}
+            && (is_word(cc) || (p > 0 && is_word(pc)))
+        {
+            return self.expand(p, is_word);
+        }
         (p, p)
     }
 

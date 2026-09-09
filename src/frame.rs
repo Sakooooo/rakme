@@ -29,7 +29,14 @@ pub fn cw(c: char, col: usize, tab: usize) -> usize {
 }
 
 /// Wrap the text from `origin` into at most `max_rows` visual lines.
-pub fn wrap(t: &Text, origin: usize, cols: usize, max_rows: usize, tab: usize, one_line: bool) -> Vec<Line> {
+pub fn wrap(
+    t: &Text,
+    origin: usize,
+    cols: usize,
+    max_rows: usize,
+    tab: usize,
+    one_line: bool,
+) -> Vec<Line> {
     let cols = cols.max(1);
     let tab = tab.max(1);
     let n = t.len();
@@ -53,13 +60,21 @@ pub fn wrap(t: &Text, origin: usize, cols: usize, max_rows: usize, tab: usize, o
             col += w;
             i += 1;
         }
-        lines.push(Line { start, end: if nl { i - 1 } else { i }, nl });
+        lines.push(Line {
+            start,
+            end: if nl { i - 1 } else { i },
+            nl,
+        });
         if nl && one_line {
             break;
         }
         if i >= n {
             if nl && lines.len() < max_rows {
-                lines.push(Line { start: i, end: i, nl: false });
+                lines.push(Line {
+                    start: i,
+                    end: i,
+                    nl: false,
+                });
             }
             break;
         }
@@ -71,7 +86,11 @@ pub fn wrap(t: &Text, origin: usize, cols: usize, max_rows: usize, tab: usize, o
 pub fn scroll(t: &Text, origin: usize, cols: usize, tab: usize, n: i64) -> usize {
     if n > 0 {
         let lines = wrap(t, origin, cols, n as usize + 1, tab, false);
-        return lines.get(n as usize).or(lines.last()).map(|l| l.start).unwrap_or(origin);
+        return lines
+            .get(n as usize)
+            .or(lines.last())
+            .map(|l| l.start)
+            .unwrap_or(origin);
     }
     let mut need = (-n) as usize;
     let mut o = origin.min(t.len());
@@ -94,7 +113,11 @@ pub fn origin_for(t: &Text, idx: usize, cols: usize, tab: usize, rows_above: usi
     let idx = idx.min(t.len());
     let ls = t.line_start(idx);
     let lines = wrap(t, ls, cols, usize::MAX, tab, true);
-    let vs = lines.iter().rfind(|l| l.start <= idx).map(|l| l.start).unwrap_or(ls);
+    let vs = lines
+        .iter()
+        .rfind(|l| l.start <= idx)
+        .map(|l| l.start)
+        .unwrap_or(ls);
     scroll(t, vs, cols, tab, -(rows_above as i64))
 }
 
@@ -147,8 +170,12 @@ pub fn hit_xy(t: &Text, g: &Geom, font: &Font, x: i32, y: i32) -> usize {
 /// Pixel position (top-left of the cell) of `idx`, if visible.
 pub fn xy_of(t: &Text, g: &Geom, font: &Font, idx: usize) -> Option<(i32, i32)> {
     let lines = lines(t, g);
-    locate(t, &lines, idx, g.tab)
-        .map(|(r, c)| (g.rect.x + c as i32 * font.adv, g.rect.y + r as i32 * font.line_h))
+    locate(t, &lines, idx, g.tab).map(|(r, c)| {
+        (
+            g.rect.x + c as i32 * font.adv,
+            g.rect.y + r as i32 * font.line_h,
+        )
+    })
 }
 
 pub struct Style {
@@ -180,14 +207,21 @@ pub fn draw(pm: &mut Pixmap, font: &Font, t: &Text, g: &Geom, st: &Style) {
             };
             let x = rect.x + col as i32 * font.adv;
             let w = cw(c, col, g.tab);
-            let hl = st.hl.filter(|&(a, b, _)| i >= a && i < b).map(|(_, _, c)| c);
+            let hl = st
+                .hl
+                .filter(|&(a, b, _)| i >= a && i < b)
+                .map(|(_, _, c)| c);
             let (bg, fg) = match hl {
                 Some(c) => (Some(c), gfx::WHITE),
                 None if i >= t.q0 && i < t.q1 => (Some(st.sel), st.fg),
                 None => (None, st.fg),
             };
             if let Some(bg) = bg {
-                let wpx = if c == '\n' { rect.right() - x } else { w as i32 * font.adv };
+                let wpx = if c == '\n' {
+                    rect.right() - x
+                } else {
+                    w as i32 * font.adv
+                };
                 gfx::fill(pm, Rect::new(x, y, wpx, font.line_h).inter(rect), bg);
             }
             if c != '\t' && c != '\n' {
@@ -196,7 +230,8 @@ pub fn draw(pm: &mut Pixmap, font: &Font, t: &Text, g: &Geom, st: &Style) {
             col += w;
         }
     }
-    if st.cursor && t.q0 == t.q1
+    if st.cursor
+        && t.q0 == t.q1
         && let Some((r, c)) = locate(t, &lines, t.q0, g.tab)
     {
         let x = rect.x + c as i32 * font.adv;
@@ -217,10 +252,38 @@ mod tests {
         let t = Text::from_str("abcdef\n\nxy");
         let l = wrap(&t, 0, 4, 10, 4, false);
         assert_eq!(l.len(), 4);
-        assert_eq!(l[0], Line { start: 0, end: 4, nl: false });
-        assert_eq!(l[1], Line { start: 4, end: 6, nl: true });
-        assert_eq!(l[2], Line { start: 7, end: 7, nl: true });
-        assert_eq!(l[3], Line { start: 8, end: 10, nl: false });
+        assert_eq!(
+            l[0],
+            Line {
+                start: 0,
+                end: 4,
+                nl: false
+            }
+        );
+        assert_eq!(
+            l[1],
+            Line {
+                start: 4,
+                end: 6,
+                nl: true
+            }
+        );
+        assert_eq!(
+            l[2],
+            Line {
+                start: 7,
+                end: 7,
+                nl: true
+            }
+        );
+        assert_eq!(
+            l[3],
+            Line {
+                start: 8,
+                end: 10,
+                nl: false
+            }
+        );
     }
 
     #[test]
@@ -228,7 +291,14 @@ mod tests {
         let t = Text::from_str("a\n");
         let l = wrap(&t, 0, 80, 10, 4, false);
         assert_eq!(l.len(), 2);
-        assert_eq!(l[1], Line { start: 2, end: 2, nl: false });
+        assert_eq!(
+            l[1],
+            Line {
+                start: 2,
+                end: 2,
+                nl: false
+            }
+        );
         assert_eq!(locate(&t, &l, 2, 4), Some((1, 0)));
     }
 

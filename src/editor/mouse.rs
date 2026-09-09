@@ -15,9 +15,17 @@ impl Editor {
                     t.set_select(anchor.min(pos), anchor.max(pos));
                 }
             }
-            Action::Sweep { id, anchor, btn, .. } => {
+            Action::Sweep {
+                id, anchor, btn, ..
+            } => {
                 let pos = self.hit_pos(id, x, y);
-                self.mouse.action = Action::Sweep { id, anchor, btn, q0: anchor.min(pos), q1: anchor.max(pos) };
+                self.mouse.action = Action::Sweep {
+                    id,
+                    anchor,
+                    btn,
+                    q0: anchor.min(pos),
+                    q1: anchor.max(pos),
+                };
             }
             _ => {}
         }
@@ -103,7 +111,13 @@ impl Editor {
             Hit::RowTag | Hit::ColTag(_) | Hit::WinTag(..) | Hit::WinBody(..) => {
                 let id = self.id_of_hit(h).unwrap();
                 let pos = self.hit_pos(id, x, y);
-                self.mouse.action = Action::Sweep { id, anchor: pos, btn, q0: pos, q1: pos };
+                self.mouse.action = Action::Sweep {
+                    id,
+                    anchor: pos,
+                    btn,
+                    q0: pos,
+                    q1: pos,
+                };
             }
             Hit::WinBox(ci, wi) => {
                 let win = self.cols[ci].wins[wi].id;
@@ -147,7 +161,11 @@ impl Editor {
         if lines == 0 {
             return;
         }
-        if let Hit::WinBody(ci, wi) | Hit::WinScroll(ci, wi) | Hit::WinTag(ci, wi) | Hit::WinBox(ci, wi) = self.hit(x, y) {
+        if let Hit::WinBody(ci, wi)
+        | Hit::WinScroll(ci, wi)
+        | Hit::WinTag(ci, wi)
+        | Hit::WinBox(ci, wi) = self.hit(x, y)
+        {
             let id = self.cols[ci].wins[wi].id;
             self.scroll_by(id, lines);
         }
@@ -178,11 +196,20 @@ impl Editor {
                     }
                 }
             }
-            (b, Action::Sweep { id, btn, q0, q1, .. }) if b == btn => {
+            (
+                b,
+                Action::Sweep {
+                    id, btn, q0, q1, ..
+                },
+            ) if b == btn => {
                 self.mouse.action = Action::None;
                 let arg = self.mouse.arg.take();
                 if !self.mouse.chorded && self.text(id).is_some() {
-                    let (a, b) = if q0 == q1 { self.expand(id, q0, btn) } else { (q0, q1) };
+                    let (a, b) = if q0 == q1 {
+                        self.expand(id, q0, btn)
+                    } else {
+                        (q0, q1)
+                    };
                     let text = self.text(id).unwrap().slice(a, b);
                     if btn == 3 {
                         // Looking selects what was looked at, so the search
@@ -221,16 +248,24 @@ impl Editor {
             t.expand(pos, |c| !c.is_whitespace())
         } else {
             let (a, b) = t.expand(pos, is_filec);
-            if a == b { t.expand(pos, is_word) } else { (a, b) }
+            if a == b {
+                t.expand(pos, is_word)
+            } else {
+                (a, b)
+            }
         }
     }
 
     /// The sweep highlight to draw for `id`, if any.
     pub(super) fn sweep_of(&self, id: TextId) -> Option<(usize, usize, gfx::Color)> {
         match self.mouse.action {
-            Action::Sweep { id: sid, btn, q0, q1, .. } if sid == id => {
-                Some((q0, q1, if btn == 2 { gfx::BUT2 } else { gfx::BUT3 }))
-            }
+            Action::Sweep {
+                id: sid,
+                btn,
+                q0,
+                q1,
+                ..
+            } if sid == id => Some((q0, q1, if btn == 2 { gfx::BUT2 } else { gfx::BUT3 })),
             _ => None,
         }
     }

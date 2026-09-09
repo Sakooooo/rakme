@@ -29,7 +29,11 @@ impl Editor {
             if s.is_empty() {
                 return None;
             }
-            let p = if Path::new(s).is_absolute() { PathBuf::from(s) } else { dir.join(s) };
+            let p = if Path::new(s).is_absolute() {
+                PathBuf::from(s)
+            } else {
+                dir.join(s)
+            };
             if p.exists() { Some(p) } else { None }
         };
         if let Some(p) = try_path(text) {
@@ -76,7 +80,10 @@ impl Editor {
             return;
         }
         let (win, col) = self.ctx(id);
-        let dir = win.and_then(|w| self.win(w)).map(|w| w.dir()).unwrap_or_else(cwd);
+        let dir = win
+            .and_then(|w| self.win(w))
+            .map(|w| w.dir())
+            .unwrap_or_else(cwd);
         let ci = col.unwrap_or(self.cols.len().saturating_sub(1));
         if let Some(w) = win
             && let Some(addr) = text.strip_prefix(':')

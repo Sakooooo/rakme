@@ -42,7 +42,11 @@ impl App {
     }
 
     fn draw(&mut self, event_loop: &ActiveEventLoop) {
-        let (Some(pixels), Some(editor), Some(window)) = (self.pixels.as_mut(), self.editor.as_ref(), self.window.as_ref()) else {
+        let (Some(pixels), Some(editor), Some(window)) = (
+            self.pixels.as_mut(),
+            self.editor.as_ref(),
+            self.window.as_ref(),
+        ) else {
             return;
         };
         let size = window.inner_size();
@@ -112,7 +116,9 @@ impl App {
             Key::Named(NamedKey::Escape) => Some(EKey::Escape),
             Key::Named(NamedKey::Enter) => Some(EKey::Char('\n')),
             Key::Named(NamedKey::Tab) => Some(EKey::Char('\t')),
-            Key::Character(s) if self.ctrl => s.chars().next().map(|c| EKey::Ctrl(c.to_ascii_lowercase())),
+            Key::Character(s) if self.ctrl => {
+                s.chars().next().map(|c| EKey::Ctrl(c.to_ascii_lowercase()))
+            }
             _ => None,
         };
         match k {
@@ -144,7 +150,10 @@ impl ApplicationHandler<exec::Result> for App {
         let surface = SurfaceTexture::new(size.width, size.height, window.clone());
         self.pixels = Some(Pixels::new(size.width.max(1), size.height.max(1), surface).unwrap());
 
-        let font_size = std::env::var("RAKME_FONT_SIZE").ok().and_then(|s| s.parse().ok()).unwrap_or(14.0);
+        let font_size = std::env::var("RAKME_FONT_SIZE")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(14.0);
         let font = match Font::load(font_size) {
             Ok(f) => f,
             Err(e) => {
@@ -153,7 +162,12 @@ impl ApplicationHandler<exec::Result> for App {
                 return;
             }
         };
-        self.editor = Some(Editor::new(font, size.width as i32, size.height as i32, &self.files));
+        self.editor = Some(Editor::new(
+            font,
+            size.width as i32,
+            size.height as i32,
+            &self.files,
+        ));
         self.window = Some(window);
     }
 
@@ -164,7 +178,12 @@ impl ApplicationHandler<exec::Result> for App {
         self.after_event(event_loop);
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: winit::window::WindowId, event: WindowEvent) {
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _window_id: winit::window::WindowId,
+        event: WindowEvent,
+    ) {
         match event {
             WindowEvent::Resized(size) => {
                 if size.width == 0 || size.height == 0 {

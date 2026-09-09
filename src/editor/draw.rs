@@ -20,7 +20,12 @@ impl Editor {
             let bx = Rect::new(cr.x + 1, cr.y + TAG_PAD + 1, SB_W - 3, SB_W - 3);
             gfx::fill(pm, bx, gfx::WHITE);
             gfx::outline(pm, bx, gfx::PURPLE_BLUE);
-            self.draw_text(pm, TextId::ColTag(col.id), gfx::PALE_BLUE, gfx::PALE_GREY_GREEN);
+            self.draw_text(
+                pm,
+                TextId::ColTag(col.id),
+                gfx::PALE_BLUE,
+                gfx::PALE_GREY_GREEN,
+            );
             gfx::fill(pm, Rect::new(cr.x, ct.bottom() - 1, cr.w, 1), gfx::BLACK);
 
             for wi in 0..col.wins.len() {
@@ -33,7 +38,12 @@ impl Editor {
                     gfx::fill(pm, r.bx, gfx::WHITE);
                 }
                 gfx::outline(pm, r.bx, gfx::PURPLE_BLUE);
-                self.draw_text(pm, TextId::Tag(win.id), gfx::PALE_BLUE, gfx::PALE_GREY_GREEN);
+                self.draw_text(
+                    pm,
+                    TextId::Tag(win.id),
+                    gfx::PALE_BLUE,
+                    gfx::PALE_GREY_GREEN,
+                );
                 gfx::fill(pm, Rect::new(cr.x, r.tag.bottom() - 1, cr.w, 1), gfx::BLACK);
 
                 if !r.body.is_empty() {
@@ -58,18 +68,32 @@ impl Editor {
         };
         let total = win.body.len().max(1) as f32;
         let lines = frame::lines(&win.body, &g);
-        let end = lines.last().map(|l| l.end + usize::from(l.nl)).unwrap_or(win.origin).min(win.body.len());
+        let end = lines
+            .last()
+            .map(|l| l.end + usize::from(l.nl))
+            .unwrap_or(win.origin)
+            .min(win.body.len());
         let y0 = r.sb.y + (r.sb.h as f32 * win.origin as f32 / total) as i32;
         let y1 = r.sb.y + (r.sb.h as f32 * end as f32 / total) as i32;
         let y1 = y1.max(y0 + 2).min(r.sb.bottom());
-        gfx::fill(pm, Rect::new(r.sb.x, y0, r.sb.w - 1, y1 - y0), gfx::PALE_YELLOW);
+        gfx::fill(
+            pm,
+            Rect::new(r.sb.x, y0, r.sb.w - 1, y1 - y0),
+            gfx::PALE_YELLOW,
+        );
     }
 
     fn draw_text(&self, pm: &mut Pixmap, id: TextId, bg: gfx::Color, sel: gfx::Color) {
         let (Some(t), Some(g)) = (self.text(id), self.geom(id)) else {
             return;
         };
-        let st = Style { bg, sel, fg: gfx::BLACK, hl: self.sweep_of(id), cursor: true };
+        let st = Style {
+            bg,
+            sel,
+            fg: gfx::BLACK,
+            hl: self.sweep_of(id),
+            cursor: true,
+        };
         frame::draw(pm, &self.font, t, &g, &st);
     }
 }

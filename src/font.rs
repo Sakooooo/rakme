@@ -23,9 +23,8 @@ pub struct Font {
 
 impl Font {
     pub fn load(size: f32) -> Result<Font, String> {
-        let path = find_font().ok_or_else(|| {
-            "no monospace font found; set RAKME_FONT to a .ttf file".to_string()
-        })?;
+        let path = find_font()
+            .ok_or_else(|| "no monospace font found; set RAKME_FONT to a .ttf file".to_string())?;
         let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let font = FontArc::try_from_vec(bytes).map_err(|e| format!("{}: {e}", path.display()))?;
         Ok(Font::from_arc(font, size))
@@ -73,7 +72,13 @@ impl Font {
         let mut g = s.scaled_glyph(c);
         g.position = point(0.0, self.ascent as f32);
         let Some(og) = self.font.outline_glyph(g) else {
-            return Glyph { w: 0, h: 0, x: 0, y: 0, cov: vec![] };
+            return Glyph {
+                w: 0,
+                h: 0,
+                x: 0,
+                y: 0,
+                cov: vec![],
+            };
         };
         let b = og.px_bounds();
         let w = b.width().ceil().max(0.0) as usize;
@@ -85,7 +90,13 @@ impl Font {
                 cov[y * w + x] = (a.clamp(0.0, 1.0) * 255.0) as u8;
             }
         });
-        Glyph { w, h, x: b.min.x as i32, y: b.min.y as i32, cov }
+        Glyph {
+            w,
+            h,
+            x: b.min.x as i32,
+            y: b.min.y as i32,
+            cov,
+        }
     }
 }
 

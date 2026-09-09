@@ -69,7 +69,11 @@ fn run(req: &Request) -> (String, String) {
     for (k, v) in &req.env {
         c.env(k, v);
     }
-    c.stdin(if req.input.is_some() { Stdio::piped() } else { Stdio::null() });
+    c.stdin(if req.input.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    });
     c.stdout(Stdio::piped());
     c.stderr(Stdio::piped());
     let mut child = match c.spawn() {

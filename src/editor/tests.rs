@@ -9,7 +9,9 @@ fn editor() -> Editor {
 fn point_at(ed: &Editor, id: TextId, needle: &str) -> (i32, i32) {
     let t = ed.text(id).unwrap();
     let s = t.contents();
-    let byte = s.find(needle).unwrap_or_else(|| panic!("{needle:?} not in {s:?}"));
+    let byte = s
+        .find(needle)
+        .unwrap_or_else(|| panic!("{needle:?} not in {s:?}"));
     let idx = s[..byte].chars().count();
     let (x, y) = ed.xy_of(id, idx).expect("needle is visible");
     (x + 2, y + 2)
@@ -97,7 +99,9 @@ fn button3_searches_forward_and_wraps() {
     click(&mut ed, 2, p);
     let id = only_win_in(&ed, 0);
     let body = TextId::Body(id);
-    ed.text_mut(body).unwrap().set_contents("foo bar\nfoo baz\n");
+    ed.text_mut(body)
+        .unwrap()
+        .set_contents("foo bar\nfoo baz\n");
     let p = point_at(&ed, body, "foo");
     click(&mut ed, 3, p);
     let t = ed.text(body).unwrap();
@@ -129,7 +133,12 @@ fn put_get_and_del_warning() {
     // Del on a dirty window is refused once and reported in +Errors.
     ed.execute(TextId::Tag(id), "Del");
     assert!(ed.find_win(id).is_some());
-    let errs = ed.cols.iter().flat_map(|c| c.wins.iter()).find(|w| w.name.ends_with("+Errors")).unwrap();
+    let errs = ed
+        .cols
+        .iter()
+        .flat_map(|c| c.wins.iter())
+        .find(|w| w.name.ends_with("+Errors"))
+        .unwrap();
     assert!(errs.body.contents().contains("file modified"));
 
     ed.execute(TextId::Tag(id), "Put");

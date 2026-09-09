@@ -114,11 +114,19 @@ impl Editor {
                 t.set_select(p, p);
             }
             Key::Left => {
-                let p = if t.q0 == t.q1 { t.q0.saturating_sub(1) } else { t.q0 };
+                let p = if t.q0 == t.q1 {
+                    t.q0.saturating_sub(1)
+                } else {
+                    t.q0
+                };
                 t.set_select(p, p);
             }
             Key::Right => {
-                let p = if t.q0 == t.q1 { (t.q1 + 1).min(t.len()) } else { t.q1 };
+                let p = if t.q0 == t.q1 {
+                    (t.q1 + 1).min(t.len())
+                } else {
+                    t.q1
+                };
                 t.set_select(p, p);
             }
             Key::Up | Key::Down => {
@@ -141,7 +149,11 @@ impl Editor {
             }
             Key::PageUp | Key::PageDown => {
                 if let TextId::Body(w) = id {
-                    let n = if matches!(k, Key::PageUp) { -rows.max(1) } else { rows.max(1) };
+                    let n = if matches!(k, Key::PageUp) {
+                        -rows.max(1)
+                    } else {
+                        rows.max(1)
+                    };
                     self.scroll_by(w, n);
                 }
                 return;

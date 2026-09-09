@@ -150,15 +150,24 @@ impl Editor {
         if btn == 1 {
             let cr = self.col_rect(ci);
             let left = if ci > 0 { self.col_rect(ci - 1).w } else { 0 };
-            let right = if ci + 1 < n { self.col_rect(ci + 1).w } else { 0 };
+            let right = if ci + 1 < n {
+                self.col_rect(ci + 1).w
+            } else {
+                0
+            };
             if right >= left && ci + 1 < n {
-                self.cols[ci + 1].x0 = (cr.right() + right / 2).min(self.w - (n - ci - 1) as i32 * min_w);
+                self.cols[ci + 1].x0 =
+                    (cr.right() + right / 2).min(self.w - (n - ci - 1) as i32 * min_w);
             } else if ci > 0 {
                 self.cols[ci].x0 = (cr.x - left / 2).max(ci as i32 * min_w);
             }
         } else {
             for j in 0..n {
-                self.cols[j].x0 = if j <= ci { j as i32 * min_w } else { self.w - (n - j) as i32 * min_w };
+                self.cols[j].x0 = if j <= ci {
+                    j as i32 * min_w
+                } else {
+                    self.w - (n - j) as i32 * min_w
+                };
             }
         }
         self.fix_layout();
@@ -195,7 +204,12 @@ impl Editor {
                     }
                 }
                 prefix.push(' ');
-                let old_len = w.tag.chars().iter().position(|&c| c == '|').unwrap_or(w.tag.len());
+                let old_len = w
+                    .tag
+                    .chars()
+                    .iter()
+                    .position(|&c| c == '|')
+                    .unwrap_or(w.tag.len());
                 let old = w.tag.slice(0, old_len);
                 if old != prefix {
                     w.tag.replace_raw(0, old_len, &prefix);
@@ -211,6 +225,11 @@ impl Editor {
     /// The file name currently written at the start of the tag.
     pub(super) fn tag_name(&self, id: usize) -> String {
         let w = self.win(id).unwrap();
-        w.tag.contents().split_whitespace().next().unwrap_or("").to_string()
+        w.tag
+            .contents()
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .to_string()
     }
 }
