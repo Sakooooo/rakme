@@ -238,45 +238,32 @@ impl Text {
 
     /// Start of the logical line containing position `p`.
     pub fn line_start(&self, p: usize) -> usize {
-        let mut i = p.min(self.len());
-        while i > 0
-            && let Some(current_char) = self.buf.get_char(i)
-            && current_char != '\n'
-        {
-            i -= 1;
-        }
-        i
+        let p = p.min(self.len());
+        self.buf.line_to_char(self.buf.char_to_line(p))
     }
 
     /// Index of the newline ending the line containing `p`, or the length.
     pub fn line_end(&self, p: usize) -> usize {
-        let mut i = p.min(self.len());
-        while i < self.len()
-            && let Some(current_char) = self.buf.get_char(i)
-            && current_char != '\n'
-        {
-            i += 1;
+        let p = p.min(self.len());
+        self.line_end_of(self.buf.char_to_line(p))
+    }
+
+    /// Index of the newline ending 0-based line `line`, or the length.
+    fn line_end_of(&self, line: usize) -> usize {
+        if line + 1 < self.buf.len_lines() {
+            self.buf.line_to_char(line + 1) - 1
+        } else {
+            self.len()
         }
-        i
     }
 
     /// Range (including the newline) of 1-based line `n`.
     pub fn line_range(&self, n: usize) -> (usize, usize) {
-        let mut line = 1;
-        let mut start = 0;
-        for (i, c) in self.buf.chars().enumerate() {
-            if line == n {
-                break;
-            }
-            if c == '\n' {
-                line += 1;
-                start = i + 1;
-            }
-        }
-        if line < n {
+        if n == 0 || n > self.buf.len_lines() {
             return (self.len(), self.len());
         }
-        let end = self.line_end(start);
+        let start = self.buf.line_to_char(n - 1);
+        let end = self.line_end_of(n - 1);
         (start, (end + 1).min(self.len()))
     }
 
