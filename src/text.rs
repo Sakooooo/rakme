@@ -115,17 +115,11 @@ impl Text {
     // TODO: make this not &[char] maybe
     fn splice(&mut self, a: usize, b: usize, ins: &[char]) -> Vec<char> {
         self.seq += 1;
+        let del: Vec<char> = self.buf.slice(a..b).chars().collect();
         self.buf.remove(a..b);
         let owned: String = ins.iter().collect();
-        let string = &owned;
-        self.buf.insert(a, string);
-        // self.buf.slice(a..b).chars().to_owned().collect()
-        if let Some(slice) = self.buf.get_slice(a..b) {
-            slice.chars().to_owned().collect()
-        } else {
-            Vec::new()
-        }
-        // self.buf.splice(a..b, ins.iter().copied()).collect()
+        self.buf.insert(a, &owned);
+        del
     }
 
     fn push_change(&mut self, ch: Change) {
@@ -298,7 +292,7 @@ impl Text {
         }
         let mut b = p;
         while b < self.len()
-            && let Some(current_char) = self.buf.get_char(b - 1)
+            && let Some(current_char) = self.buf.get_char(b)
             && f(current_char)
         {
             b += 1;
@@ -436,6 +430,22 @@ mod tests {
         assert!(t.is_dirty());
         t.undo();
         assert!(!t.is_dirty());
+    }
+
+    #[test]
+    fn undo_restores_deleted_text() {
+        let mut t = Text::from_str("hello world");
+        t.delete(0, 6);
+        assert_eq!(t.contents(), "world");
+        assert!(t.undo());
+        assert_eq!(t.contents(), "hello world");
+        assert_eq!((t.q0, t.q1), (0, 6));
+        t.replace(6, 11, "there");
+        assert_eq!(t.contents(), "hello there");
+        assert!(t.undo());
+        assert_eq!(t.contents(), "hello world");
+        assert!(t.redo());
+        assert_eq!(t.contents(), "hello there");
     }
 
     #[test]
