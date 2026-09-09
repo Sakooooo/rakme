@@ -73,7 +73,11 @@ impl Editor {
                     self.focus = TextId::Body(id);
                 } else {
                     let base = dir.clone().unwrap_or_else(cwd);
-                    let path = if Path::new(arg).is_absolute() { PathBuf::from(arg) } else { base.join(arg) };
+                    let path = if Path::new(arg).is_absolute() {
+                        PathBuf::from(arg)
+                    } else {
+                        base.join(arg)
+                    };
                     let id = if path.exists() {
                         self.open_file(&path, ci)
                     } else {
@@ -117,7 +121,11 @@ impl Editor {
             "Undo" | "Redo" => {
                 if let Some(w) = target {
                     let t = &mut self.win_mut(w).unwrap().body;
-                    if name == "Undo" { t.undo() } else { t.redo() };
+                    if name == "Undo" {
+                        t.undo()
+                    } else {
+                        t.redo()
+                    };
                     self.show_cursor(TextId::Body(w));
                 }
             }
@@ -126,7 +134,11 @@ impl Editor {
             "Snarf" => self.snarf_sel(self.focus),
             "Look" => {
                 if let Some(w) = target {
-                    let pat = if arg.is_empty() { self.selection_text(self.focus) } else { arg.to_string() };
+                    let pat = if arg.is_empty() {
+                        self.selection_text(self.focus)
+                    } else {
+                        arg.to_string()
+                    };
                     self.search(w, &pat);
                 }
             }
@@ -161,9 +173,13 @@ impl Editor {
                 }
             }
             "Zerox" => {
-                if let (Some(w), Some(ci)) = (target, col.or_else(|| self.find_win(target?).map(|(c, _)| c))) {
+                if let (Some(w), Some(ci)) = (
+                    target,
+                    col.or_else(|| self.find_win(target?).map(|(c, _)| c)),
+                ) {
                     let src = self.win(w).unwrap();
-                    let (name, body, tab, is_dir) = (src.name.clone(), src.body.contents(), src.tab, src.is_dir);
+                    let (name, body, tab, is_dir) =
+                        (src.name.clone(), src.body.contents(), src.tab, src.is_dir);
                     let nid = self.new_win(ci, name);
                     let nw = self.win_mut(nid).unwrap();
                     nw.body.set_contents(&body);
@@ -222,7 +238,10 @@ impl Editor {
     /// `exec_done`.
     fn shell(&mut self, id: TextId, cmd: &str, kind: Kind) {
         let (win, col) = self.ctx(id);
-        let dir = win.and_then(|w| self.win(w)).map(|w| w.dir()).unwrap_or_else(cwd);
+        let dir = win
+            .and_then(|w| self.win(w))
+            .map(|w| w.dir())
+            .unwrap_or_else(cwd);
         let (input, range) = match (kind, win) {
             (Kind::Plain, _) => (None, (0, 0)),
             (_, None) => {
@@ -232,7 +251,11 @@ impl Editor {
             (k, Some(w)) => {
                 let t = &self.win(w).unwrap().body;
                 let range = (t.q0, t.q1);
-                let input = if k == Kind::Input { None } else { Some(t.selection()) };
+                let input = if k == Kind::Input {
+                    None
+                } else {
+                    Some(t.selection())
+                };
                 (input, range)
             }
         };

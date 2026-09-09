@@ -105,12 +105,20 @@ impl Editor {
             self.error(Some(dir), Some(ci), &msg);
             return;
         }
-        let name = if arg.is_empty() { self.tag_name(id) } else { arg.to_string() };
+        let name = if arg.is_empty() {
+            self.tag_name(id)
+        } else {
+            arg.to_string()
+        };
         if name.is_empty() {
             self.error(Some(dir), Some(ci), "no file name");
             return;
         }
-        let path = if Path::new(&name).is_absolute() { PathBuf::from(&name) } else { dir.join(&name) };
+        let path = if Path::new(&name).is_absolute() {
+            PathBuf::from(&name)
+        } else {
+            dir.join(&name)
+        };
         let name = clean_path(&path);
         match Self::read_path(&path) {
             Ok((s, is_dir)) => {
@@ -139,12 +147,20 @@ impl Editor {
             self.error(Some(dir), Some(ci), "cannot write a directory");
             return;
         }
-        let name = if arg.is_empty() { self.tag_name(id) } else { arg.to_string() };
+        let name = if arg.is_empty() {
+            self.tag_name(id)
+        } else {
+            arg.to_string()
+        };
         if name.is_empty() {
             self.error(Some(dir), Some(ci), "no file name");
             return;
         }
-        let path = if Path::new(&name).is_absolute() { PathBuf::from(&name) } else { dir.join(&name) };
+        let path = if Path::new(&name).is_absolute() {
+            PathBuf::from(&name)
+        } else {
+            dir.join(&name)
+        };
         let contents = self.win(id).unwrap().body.contents();
         match std::fs::write(&path, contents) {
             Ok(()) => {
@@ -168,7 +184,7 @@ impl Editor {
             return;
         };
         let w = self.win(id).unwrap();
-        if !force && w.dirty() && w.warned != Some(w.body.seq) {
+        if !force && (w.dirty() && !w.is_scratch()) && w.warned != Some(w.body.seq) {
             let seq = w.body.seq;
             let (dir, name) = (w.dir(), w.name.clone());
             self.win_mut(id).unwrap().warned = Some(seq);

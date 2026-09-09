@@ -91,6 +91,11 @@ impl Window {
             .unwrap_or_else(cwd)
     }
 
+    // todo: probably make this a field in the struct instead
+    fn is_scratch(&self) -> bool {
+        self.name.ends_with("+Errors")
+    }
+
     fn dirty(&self) -> bool {
         !self.is_dir && self.body.is_dirty()
     }
