@@ -96,7 +96,6 @@ impl Editor {
     }
 
     fn draw_scrollbar(&self, pixmap: &mut Pixmap, win: &Window, rects: &WinRects) {
-        gfx::fill(pixmap, rects.scrollbar, gfx::YELLOW_GREEN);
         let Some(geom) = self.geom(TextId::Body(win.id)) else {
             return;
         };
@@ -111,6 +110,8 @@ impl Editor {
         let thumb_top = trough.y + (trough.h as f32 * win.origin as f32 / total) as i32;
         let thumb_bottom = trough.y + (trough.h as f32 * visible_end as f32 / total) as i32;
         let thumb_bottom = thumb_bottom.max(thumb_top + 2).min(trough.bottom());
+
+        gfx::fill(pixmap, rects.scrollbar, gfx::YELLOW_GREEN);
         gfx::fill(
             pixmap,
             Rect::new(trough.x, thumb_top, trough.w - 1, thumb_bottom - thumb_top),
