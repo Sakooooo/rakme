@@ -53,6 +53,12 @@ pub enum TextId {
     Body(usize),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FileType {
+    Generic,
+    Rust,
+}
+
 pub struct Window {
     pub id: usize,
     pub name: String,
@@ -67,6 +73,7 @@ pub struct Window {
     /// Body revision at which a Del/Get on a dirty window was refused, so
     /// the second attempt goes through.
     warned_at_revision: Option<u64>,
+    file_type: FileType,
 }
 
 impl Window {
@@ -82,6 +89,7 @@ impl Window {
             top: 0,
             is_dir,
             warned_at_revision: None,
+            file_type: FileType::Generic,
         }
     }
 

@@ -42,10 +42,15 @@ impl Editor {
         }
         let col_idx = col_idx.min(self.columns.len() - 1);
         let id = self.alloc_id();
+        let file_type = match &name.split(".").last() {
+            Some("rs") => FileType::Rust,
+            _ => FileType::Generic,
+        };
         let mut win = Window::new(id, name);
         let top = self.windows_top(col_idx);
         let bottom = self.col_rect(col_idx).bottom();
         let col = &mut self.columns[col_idx];
+        win.file_type = file_type;
         if col.windows.is_empty() {
             win.top = top;
             col.windows.push(win);
