@@ -208,13 +208,14 @@ pub fn xy_of(text: &Text, geom: &Geom, font: &Font, pos: usize) -> Option<(i32, 
     })
 }
 
-pub struct Style {
+pub struct Style<'a> {
     pub bg: Color,
     pub sel_bg: Color,
     pub fg: Color,
     /// Extra highlight range (button 2/3 sweeps) drawn over the selection.
     pub highlight: Option<(usize, usize, Color)>,
     pub show_cursor: bool,
+    pub syntax_highlight: &'a [(usize, usize, Color)],
 }
 
 pub fn draw(pixmap: &mut Pixmap, font: &Font, text: &Text, geom: &Geom, style: &Style) {

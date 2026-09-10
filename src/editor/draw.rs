@@ -129,6 +129,8 @@ impl Editor {
             fg: gfx::BLACK,
             highlight: self.sweep_highlight(id),
             show_cursor: true,
+            // TODO: this
+            syntax_highlight: &[],
         };
         frame::draw(pixmap, &self.font, text, &geom, &style);
     }
